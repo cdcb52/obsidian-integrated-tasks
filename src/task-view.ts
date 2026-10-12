@@ -186,7 +186,9 @@ export class TaskMainView extends ItemView {
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: TaskManagerPlugin) {
     super(leaf);
-    this.navigation = false;
+    // A tab's history keeps the pages it showed, as for notes: Obsidian records the page left only when the one
+    // arriving can be navigated, so a list opened over a note would otherwise take the note's place.
+    this.navigation = true;
   }
 
   get pagePath(): string | undefined { return this.state.pagePath ?? this.state.projectPath; }
@@ -350,8 +352,6 @@ export class TaskMainView extends ItemView {
     this.state.projectPath = typeof state.projectPath === "string" ? state.projectPath : undefined;
     // There is no list of tags any more (the task sidebar lists them): a tab left on it shows All Tasks.
     if (this.state.mode === "tags" && !this.state.tag && !this.state.pagePath) this.state.mode = "all";
-    // File-backed task views must participate in normal same-tab navigation.
-    this.navigation = Boolean(this.pagePath);
     // Each view opens with the View options it was left with (a tab saved before they were kept may still say whether it showed projects).
     if (newPage || !this.stateSet) {
       this.restoreViewOptions(typeof state.showProjects === "boolean" ? state.showProjects : undefined);
@@ -368,6 +368,7 @@ export class TaskMainView extends ItemView {
     this.render();
     this.refreshTitle();
     this.plugin.refreshTaskSidebar?.();
+    if (newPage) this.plugin.followTaskView?.(this);
   }
 
   /**

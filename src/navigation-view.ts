@@ -163,13 +163,7 @@ export class TaskNavigationView extends ItemView {
     this.unsubscribe = this.plugin.index.subscribe(() => this.scheduleSettledRender());
     const syncActive = (): void => {
       if (this.plugin.settings.showFiles) this.scheduleRender();
-      const view = this.app.workspace.getActiveViewOfType(ItemView);
-      if (view?.getViewType() !== "task-manager-main") return;
-      const state = view.getState();
-      const mode = NAV_MODES.has(state.mode as TaskViewMode) ? state.mode as TaskViewMode : undefined;
-      if (state.mode === "smartLists") { this.setActive("smartLists", undefined, undefined, typeof state.smartListId === "string" ? state.smartListId : undefined); return; }
-      if (mode) this.setActive(mode, typeof state.tag === "string" ? state.tag : undefined,
-        mode === "tags" ? undefined : typeof state.pagePath === "string" ? state.pagePath : typeof state.projectPath === "string" ? state.projectPath : undefined);
+      this.followActiveView();
     };
     // Only a tab in the main area changes what is open; the sidebar itself (or another) becoming active changes nothing.
     this.registerEvent(this.app.workspace.on("active-leaf-change", leaf => {
@@ -234,6 +228,23 @@ export class TaskNavigationView extends ItemView {
     else if (project) this.expanded.add("projects");
     this.render();
   }
+
+  /** Marks what the task tab in front lists, when another tab comes to the front or Back and Forward change what it lists. */
+  followActiveView(): void {
+    const view = this.app.workspace.getActiveViewOfType(ItemView);
+    if (view?.getViewType() !== "task-manager-main") return;
+    const state = view.getState();
+    const text = (value: unknown): string | undefined => typeof value === "string" ? value : undefined;
+    const mode = NAV_MODES.has(state.mode as TaskViewMode) ? state.mode as TaskViewMode : state.mode === "smartLists" ? "smartLists" : undefined;
+    if (!mode) return;
+    const [tag, project, smartList] = mode === "smartLists" ? [undefined, undefined, text(state.smartListId)]
+      : [text(state.tag), mode === "tags" ? undefined : text(state.pagePath) ?? text(state.projectPath), undefined];
+    // Already marked (a list opened from here is marked as it opens): nothing to redraw.
+    if (mode === this.activeMode && tag === this.activeTag && project === this.activeProject && smartList === this.activeSmartList) return;
+    if (mode === "smartLists") this.setActive(mode, undefined, undefined, smartList);
+    else this.setActive(mode, tag, project);
+  }
+
   /** Redraws the list now, or (`soon`) in the next frame, along with anything else that changed by then. */
   refresh(soon = false): void {
     if (soon) this.scheduleRender(); else this.render();

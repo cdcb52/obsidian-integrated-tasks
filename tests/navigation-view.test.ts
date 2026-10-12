@@ -44,6 +44,26 @@ it("syncs sidebar selection through the supported active-view API", async () => 
   expect(expanded.has("tags")).toBe(true);
 });
 
+it("follows the tab in front as Back and Forward change what it lists, redrawing only when that changed", () => {
+  let state: Record<string, unknown> = { mode: "upcoming" };
+  const view = new TaskNavigationView({} as WorkspaceLeaf, { settings: {} } as unknown as TaskManagerPlugin);
+  view.app = { workspace: { getActiveViewOfType: () => ({ getViewType: () => "task-manager-main", getState: () => state }) } } as unknown as App;
+  const render = vi.spyOn(view as unknown as { render(): void }, "render").mockImplementation(() => {});
+  const setActive = vi.spyOn(view, "setActive");
+  view.followActiveView();
+  expect(setActive).toHaveBeenLastCalledWith("upcoming", undefined, undefined);
+  // Opened from the sidebar, a list is marked already: no second redraw.
+  view.followActiveView();
+  expect(render).toHaveBeenCalledOnce();
+  state = { mode: "smartLists", smartListId: "calls" };
+  view.followActiveView();
+  expect(setActive).toHaveBeenLastCalledWith("smartLists", undefined, undefined, "calls");
+  state = { mode: "all", pagePath: "Work.md" };
+  view.followActiveView();
+  expect(setActive).toHaveBeenLastCalledWith("all", undefined, "Work.md");
+  expect(render).toHaveBeenCalledTimes(3);
+});
+
 it("draws nothing more once closed, even after a press that was waiting to redraw", async () => {
   vi.useFakeTimers();
   try {

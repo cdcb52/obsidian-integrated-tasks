@@ -519,16 +519,16 @@ it("keeps the pressed task selected if layout movement retargets contextmenu", (
 });
 
 
-it("allows normal navigation from project files while keeping lists persistent", async () => {
+it("navigates in its tab as a note does, lists and project pages alike, so the tab's history keeps them", async () => {
   const view = new TaskMainView({} as WorkspaceLeaf, {} as TaskManagerPlugin);
   vi.spyOn(view, "render").mockImplementation(() => {});
-  expect(view.navigation).toBe(false);
-  await view.setState({ mode: "all", pagePath: "Project.md" });
+  // Obsidian records the page a tab leaves only when the one arriving can be navigated.
   expect(view.navigation).toBe(true);
-  await view.setState({ mode: "projects", projectPath: "Legacy.md" });
+  const result = { history: false };
+  await view.setState({ mode: "all", pagePath: "Project.md" }, result);
   expect(view.navigation).toBe(true);
-  await view.setState({ mode: "projects" });
-  expect(view.navigation).toBe(false);
+  await view.setState({ mode: "today" }, result);
+  expect([view.navigation, result.history]).toEqual([true, true]);
 });
 
 it.each([

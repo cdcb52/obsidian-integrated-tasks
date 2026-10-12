@@ -467,9 +467,17 @@ export default class TaskManagerPlugin extends Plugin {
     if (currentView instanceof TaskMainView) await currentView.setState({ ...state });
     else if (existingView instanceof TaskMainView) await existingView.setState({ ...state });
     await this.app.workspace.revealLeaf(leaf);
+    if (leaf.view instanceof TaskMainView) this.followTaskView(leaf.view);
+  }
+
+  /**
+   * The task sidebar marks what `view` lists when it is the tab in front: as it opens, and as Back and Forward change
+   * it (once, when the sidebar already shows it).
+   */
+  followTaskView(view: TaskMainView): void {
+    if (this.app.workspace.getActiveViewOfType?.(TaskMainView) !== view) return;
     for (const navLeaf of this.app.workspace.getLeavesOfType(TASK_NAV_VIEW)) {
-      const view = navLeaf.view;
-      if (view instanceof TaskNavigationView) view.setActive(state.mode, state.tag, undefined, state.smartListId);
+      if (navLeaf.view instanceof TaskNavigationView) navLeaf.view.followActiveView();
     }
   }
 
