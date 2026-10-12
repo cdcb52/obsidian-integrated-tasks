@@ -515,6 +515,8 @@ button.tm-task-title {
 /* Reserve the mobile navigation strip even when Obsidian overlays its header. */
 body.is-mobile .workspace-leaf-content[data-type="task-manager-main"] .view-content.tm-main-view {
   padding-top: calc(var(--view-header-height, 44px) + var(--view-header-top-offset, env(safe-area-inset-top, 0px)) + 16px);
+  /* Obsidian's floating toolbar sits over the bottom of the view: the last task scrolls clear of it. */
+  padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
 }
 
 .tm-editor-modal > .tm-editor-actions { flex-shrink: 0; }
