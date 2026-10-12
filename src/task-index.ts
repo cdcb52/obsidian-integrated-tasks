@@ -46,7 +46,6 @@ export class TaskIndex {
   private readonly ignoredNotes = new Set<string>();
   private readonly headingsByPath = new Map<string, NoteHeading[]>();
   private readonly projectProperties = new Map<string, ProjectEntry>();
-  private readonly archivedPaths = new Set<string>();
   private readonly projectPaths = new Set<string>();
   private readonly listeners = new Set<IndexListener>();
   // Obsidian's offref only removes listeners from the emitter it is called on.
@@ -249,7 +248,6 @@ export class TaskIndex {
     this.headingsByPath.delete(path);
     this.projectPaths.delete(path);
     this.projectProperties.delete(path);
-    this.archivedPaths.delete(path);
   }
 
   private isDeleted(file: TFile, path: string): boolean {
@@ -322,7 +320,6 @@ export class TaskIndex {
           path,
           name: path.split("/").pop()?.replace(/\.md$/i, "") ?? path,
           headings: this.headingsForPath(path),
-          archived: this.archivedPaths.has(path),
           // Cancelled tasks count as neither.
           openTasks: tasks.filter((task) => !task.completed).length,
           completedTasks: tasks.filter((task) => task.status === "done").length
@@ -537,7 +534,7 @@ export class TaskIndex {
     }
   }
 
-  /** Returns whether project membership, archive status, or project properties changed. */
+  /** Returns whether project membership or project properties changed. */
   private updateProjectStatus(file: TFile): boolean {
     const path = file.path;
     this.projectColors = undefined;
@@ -546,10 +543,6 @@ export class TaskIndex {
     // "changed". Until then keep what is known, or a project would drop out of views for a moment.
     if (!cache && !this.ignoredNotes.has(path)) return false;
     const tags = cache ? getAllTags(cache) : null;
-    const wasArchived = this.archivedPaths.has(path);
-    const archived = Boolean(tags?.includes("#archived"));
-    if (archived) this.archivedPaths.add(path);
-    else this.archivedPaths.delete(path);
     const previous = this.projectProperties.get(path);
     // An ignored note is not a project either.
     if (!this.ignoredNotes.has(path) && tags?.some((tag) => tag === "#project" || tag.startsWith("#project/"))) {
@@ -557,11 +550,11 @@ export class TaskIndex {
       const properties: ProjectEntry = { ...parseProjectProperties(cache?.frontmatter, this.getDateFormat()), parent: parseProjectParent(cache?.frontmatter) };
       this.projectPaths.add(path);
       this.projectProperties.set(path, properties);
-      return wasArchived !== archived || !wasProject || JSON.stringify(previous) !== JSON.stringify(properties);
+      return !wasProject || JSON.stringify(previous) !== JSON.stringify(properties);
     }
     const wasProject = this.projectPaths.delete(path);
     this.projectProperties.delete(path);
-    return wasArchived !== archived || wasProject;
+    return wasProject;
   }
 
   private emit(): void {

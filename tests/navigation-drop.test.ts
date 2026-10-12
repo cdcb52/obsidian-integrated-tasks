@@ -18,7 +18,7 @@ function sidebar() {
   const plugin = {
     settings: { ...DEFAULT_SETTINGS, showFiles: false },
     index: {
-      projects: () => [{ path: "Work.md", name: "Work", archived: false, progress: 0 }],
+      projects: () => [{ path: "Work.md", name: "Work", progress: 0 }],
       tagSummaries: () => [{ name: "errand", openTasks: 1, completedTasks: 0 }],
       query: () => []
     }

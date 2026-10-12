@@ -117,7 +117,7 @@ it("scrolls to its dates once shown, when drawn in a hidden tab", () => {
 
 it("repositions project bars after scrolling and retains date editing", async () => {
   const container = new Element();
-  const project = { path: "Project.md", name: "Project", openTasks: 1, completedTasks: 0, archived: false, scheduledDate: "2026-09-18", endDate: "2026-09-25", deadline: "2026-10-01" };
+  const project = { path: "Project.md", name: "Project", openTasks: 1, completedTasks: 0, scheduledDate: "2026-09-18", endDate: "2026-09-25", deadline: "2026-10-01" };
   const update = vi.fn().mockResolvedValue(undefined);
   const navigate = vi.fn();
   const viewportChanged = vi.fn();
@@ -157,14 +157,14 @@ it("repositions project bars after scrolling and retains date editing", async ()
   expect(project.deadline).toBe("2026-10-01");
 });
 
-it("groups active and archived projects and shows only deadlines in their labels", () => {
+it("groups projects by status and shows only deadlines in their labels", () => {
   const root = new Element();
   const base = { openTasks: 1, completedTasks: 0, scheduledDate: "2026-09-18", endDate: "2026-09-25", deadline: "2026-10-01", parent: "Parent.md" };
   renderGantt(root as never, { projects: [
-    { ...base, name: "Old", path: "Old.md", archived: true },
-    { ...base, name: "New", path: "New.md", archived: false }
+    { ...base, name: "Old", path: "Old.md", status: "cancelled" as const },
+    { ...base, name: "New", path: "New.md" }
   ], anchor: "2026-09-18", zoom: "month", dateFormat: "YYYY-MM-DD", navigate: vi.fn(), open: vi.fn(), update: vi.fn() });
-  expect(root.all().filter(el => el.attrs.role === "heading").map(el => el.text)).toEqual(["Active", "Archived"]);
+  expect(root.all().filter(el => el.attrs.role === "heading").map(el => el.text)).toEqual(["To do", "Cancelled"]);
   expect(root.all().filter(el => el.cls === "tm-task-title").map(el => el.text)).toEqual(["New", "Old"]);
   for (const metadata of root.all().filter(el => el.cls === "tm-project-header-metadata")) {
     expect(metadata.children).toHaveLength(1);
@@ -175,7 +175,7 @@ it("groups active and archived projects and shows only deadlines in their labels
 it("shows label deadlines as a Things row does in the Things style", () => {
   vi.useFakeTimers({ now: new Date(2026, 8, 19, 12), toFake: ["Date"] });
   const root = new Element(), edit = vi.fn();
-  const base = { openTasks: 1, completedTasks: 0, archived: false, scheduledDate: "2026-09-10" };
+  const base = { openTasks: 1, completedTasks: 0, scheduledDate: "2026-09-10" };
   renderGantt(root as never, { projects: [
     { ...base, name: "Soon", path: "Soon.md", deadline: "2026-10-01" },
     { ...base, name: "Late", path: "Late.md", deadline: "2026-09-16" }

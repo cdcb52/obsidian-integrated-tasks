@@ -7,7 +7,7 @@ vi.mock("obsidian", async importOriginal => {
   return { ...original, Menu: class {}, Notice: class {}, setIcon: vi.fn() };
 });
 
-import { TFile, type App, type WorkspaceLeaf } from "obsidian";
+import { Platform, TFile, type App, type WorkspaceLeaf } from "obsidian";
 import { TaskIndex } from "../src/task-index";
 import { TaskMainView } from "../src/task-view";
 import { parseTaskQuery } from "../src/task-query";
@@ -133,23 +133,25 @@ describe("The Projects view", () => {
     "Site.md": { tags: ["project"], status: "In progress", priority: 1 },
     "Home.md": { tags: ["project"], status: "on hold" },
     "Garden.md": { tags: ["project"] },
-    "Old.md": { tags: ["project", "archived"] }
+    "Old.md": { tags: ["project", "archived"], status: "Cancelled" }
   };
   const sections = (content: HTMLElement) => Array.from(content.querySelectorAll(".tm-section, .tm-kanban-column")).map(section => [
-    section.querySelector("h2")!.firstChild!.textContent, Array.from(section.querySelectorAll(".tm-task-title")).map(title => title.textContent)
+    (section.querySelector("h2 > span") ?? section.querySelector("h2"))!.textContent, Array.from(section.querySelectorAll(".tm-task-title")).map(title => title.textContent)
   ]);
 
-  it("lists projects as before by View default, and boards them by their status property", async () => {
+  it("lists and boards projects by their status, every status a group, and has no calendar", async () => {
     const { view, plugin, settings, content } = await setup(projects(), frontmatter);
     await view.setState({ mode: "projects" });
-    // A status property says whether a project is done; without one, its tasks do.
-    expect(sections(content())).toEqual([["Active", ["Home", "Site"]], ["Completed", ["Garden"]], ["Archived", ["Old"]]]);
-    expect(Array.from(content().querySelectorAll(".tm-project-status")).map(status => status.textContent)).toEqual(["Waiting", "In progress"]);
-    const button = (key: string) => content().querySelector<HTMLButtonElement>(`[data-tm-focus-key="${key}"]`)!;
-    expect(["layout-list", "layout-calendar", "layout-kanban", "layout-gantt"].every(key => button(key))).toBe(true);
-    button("layout-kanban").click();
+    // A status property says a project's status; without one, its tasks say whether it is done.
+    const byStatus = [["To do", []], ["In progress", ["Site"]], ["Waiting", ["Home"]], ["Done", ["Garden"]], ["Cancelled", ["Old"]]];
+    expect(sections(content())).toEqual(byStatus);
+    expect(Array.from(content().querySelectorAll(".tm-project-status")).map(status => status.textContent)).toEqual(["In progress", "Waiting", "Cancelled"]);
+    const button = (key: string) => content().querySelector<HTMLButtonElement>(`[data-tm-focus-key="${key}"]`);
+    expect(["layout-list", "layout-kanban", "layout-gantt"].every(key => button(key))).toBe(true);
+    expect(button("layout-calendar")).toBeNull();
+    button("layout-kanban")!.click();
     expect(settings.viewLayouts.projects).toBe("kanban");
-    expect(sections(content())).toEqual([["To do", []], ["In progress", ["Site"]], ["Waiting", ["Home"]], ["Done", ["Garden"]], ["Cancelled", []]]);
+    expect(sections(content())).toEqual(byStatus);
     // Dropped in a column, a project takes its status.
     const internal = view as unknown as { dropListTask(task: unknown, group: unknown): Promise<void> };
     await internal.dropListTask({ id: "project:Home.md" }, { property: "status", value: "Done" });
@@ -157,7 +159,7 @@ describe("The Projects view", () => {
     const [path, change] = plugin.updateProject.mock.calls[0] as [string, (draft: Record<string, unknown>) => Record<string, unknown>];
     expect(path).toBe("Home.md");
     expect(change({ name: "Home" })).toEqual({ name: "Home", status: "done" });
-    button("layout-gantt").click();
+    button("layout-gantt")!.click();
     expect(settings.viewLayouts.projects).toBe("gantt");
     expect(content().querySelectorAll(".tm-gantt-project")).toHaveLength(4);
   });
@@ -171,7 +173,7 @@ describe("The Projects view", () => {
     expect(content().querySelector("[data-tm-focus-key='option-convert']")).toBeNull();
     content().querySelector<HTMLButtonElement>("[data-tm-focus-key='option-priority']")!.click();
     content().querySelector<HTMLElement>(".tm-options-dropdown [data-value='1']")!.click();
-    expect(sections(content())).toEqual([["Active", ["Site"]]]);
+    expect(sections(content())).toEqual([["To do", []], ["In progress", ["Site"]], ["Waiting", []], ["Done", []], ["Cancelled", []]]);
     expect(settings.viewOptions.projects?.filters).toEqual([{ property: "priority", operator: "is", values: ["1"] }]);
   });
 
@@ -180,6 +182,8 @@ describe("The Projects view", () => {
     await view.setState({ mode: "all", pagePath: "Site.md" });
     const card = () => content().querySelector<HTMLElement>(".tm-project-description")!;
     expect(card().hidden).toBe(false);
+    // Under the whole header: the title, its properties, the layouts and the buttons.
+    expect(card().previousElementSibling?.classList.contains("tm-view-header")).toBe(true);
     expect(card().textContent).toBe("The new website.\nLaunch in spring.");
     card().click();
     const field = card().querySelector("textarea")!;
@@ -195,6 +199,17 @@ describe("The Projects view", () => {
 });
 
 describe("Calendar scope and Gantt range kept for each view", () => {
+  it("opens a calendar on four days on a phone", async () => {
+    const platform = Platform as { isPhone?: boolean };
+    platform.isPhone = true;
+    try {
+      const { view, settings } = await setup([["A.md", "- [ ] Call"]]);
+      await view.setState({ mode: "today", layout: "calendar" } as never);
+      expect((view.getState() as { calendarScope?: string }).calendarScope).toBe("four-day");
+      expect(settings.viewPeriods.today).toBeUndefined();
+    } finally { platform.isPhone = false; }
+  });
+
   it("opens each view's calendar at the scope it was left at, and the Projects Gantt at its range", async () => {
     const today = todayIso();
     const { view, settings, content } = await setup([["A.md", `- [ ] Call ${today}`], ["Site.md", "- [ ] Page"]], { "Site.md": { tags: ["project"], start: today, end: today } });

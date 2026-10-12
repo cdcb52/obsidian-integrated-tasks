@@ -61,7 +61,7 @@ export function setProjectDescription(frontmatter: Record<string, unknown>, text
   for (const key of keys.length ? keys : ["description"]) frontmatter[key] = value;
 }
 
-/** Add editable project fields without replacing existing values or aliases. */
+/** Add every project property (empty) without replacing existing values or aliases. */
 export function addProjectProperties(frontmatter: Record<string, unknown>): void {
   const rawTags = frontmatter.tags;
   const tags: unknown[] = Array.isArray(rawTags) ? [...(rawTags as unknown[])] : typeof rawTags === "string" ? rawTags.split(/[,\s]+/).filter(Boolean) : [];
@@ -73,7 +73,10 @@ export function addProjectProperties(frontmatter: Record<string, unknown>): void
     ["end date", ["enddate"]],
     ["deadline", ["deadline"]],
     ["priority", ["priority"]],
-    ["parent", ["parent"]]
+    ["status", ["status"]],
+    ["parent", ["parent"]],
+    ["color", ["color", "colour"]],
+    ["description", ["description"]]
   ] as const) {
     if (!aliases.some((alias) => keys.has(alias))) frontmatter[name] = null;
   }

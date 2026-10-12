@@ -134,10 +134,10 @@ describe("duplicate rescans", () => {
     metadataCache.trigger("changed", files[0]);
     expect(listener).toHaveBeenCalledTimes(2);
     expect(index.projects()[0].priority).toBe(1);
-    frontmatter.set("A.md", { tags: ["project", "archived"], priority: "p1" });
+    frontmatter.set("A.md", { tags: ["project"], priority: "p1", status: "Cancelled" });
     metadataCache.trigger("changed", files[0]);
     expect(listener).toHaveBeenCalledTimes(3);
-    expect(index.projects()[0].archived).toBe(true);
+    expect(index.projects()[0].status).toBe("cancelled");
   });
 
   it("keeps a project while Obsidian rereads its metadata after a write", async () => {

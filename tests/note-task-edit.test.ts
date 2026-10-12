@@ -53,62 +53,20 @@ describe("Mod-click task editing in notes", () => {
 });
 
 
-describe("long press task editing in notes", () => {
-  afterEach(() => vi.useRealTimers());
-
-  function setup() {
+describe("checkbox presses in notes", () => {
+  it("leaves a long press to Obsidian, opening nothing", () => {
     vi.useFakeTimers();
     const document = new EventTarget();
     const root = Object.assign(new EventTarget(), { ownerDocument: document, win: { setTimeout, clearTimeout } });
     const checkbox = { isConnected: true, closest: () => checkbox };
     const open = vi.fn();
     const dispose = bindNoteTaskEdit(root as unknown as HTMLElement, () => task, open);
-    const send = (type: string, x = 0, count = 1) => {
-      const event = new Event(type, { cancelable: true });
-      Object.defineProperties(event, {
-        target: { value: checkbox },
-        touches: { value: Array.from({ length: count }, (_, identifier) => ({ identifier, clientX: x, clientY: 0 })) },
-        button: { value: 0 }
-      });
-      (type === "touchstart" || type === "click" || type === "contextmenu" ? root : document).dispatchEvent(event);
-      return event;
-    };
-    return { open, dispose, send };
-  }
-
-  it("opens after holding and suppresses release and synthetic click", () => {
-    const { open, dispose, send } = setup();
-    send("touchstart");
-    vi.advanceTimersByTime(499);
-    expect(open).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(1);
-    expect(open).toHaveBeenCalledExactlyOnceWith(task);
-    expect(send("touchend").defaultPrevented).toBe(true);
-    expect(send("click").defaultPrevented).toBe(true);
-    dispose();
-  });
-
-  it("preserves a short tap", () => {
-    const { open, dispose, send } = setup();
-    send("touchstart");
-    vi.advanceTimersByTime(100);
-    expect(send("touchend").defaultPrevented).toBe(false);
-    vi.advanceTimersByTime(500);
-    expect(open).not.toHaveBeenCalled();
-    expect(send("click").defaultPrevented).toBe(false);
-    dispose();
-  });
-
-  it.each(["scroll", "cancel", "multitouch", "unload"])("cancels on %s", action => {
-    const { open, dispose, send } = setup();
-    send("touchstart");
-    if (action === "scroll") send("touchmove", 20);
-    if (action === "cancel") send("touchcancel");
-    if (action === "multitouch") send("touchstart", 0, 2);
-    if (action === "unload") dispose();
-    vi.advanceTimersByTime(600);
+    const event = Object.defineProperties(new Event("touchstart", { cancelable: true }), { target: { value: checkbox }, touches: { value: [{ identifier: 0, clientX: 0, clientY: 0 }] } });
+    root.dispatchEvent(event);
+    vi.advanceTimersByTime(1000);
     expect(open).not.toHaveBeenCalled();
     dispose();
+    vi.useRealTimers();
   });
 });
 

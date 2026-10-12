@@ -31,22 +31,20 @@ function setup() {
   };
 }
 
-describe("project progress and archive indexing", () => {
+describe("project progress indexing", () => {
   it("counts all checklist items, including nested and completed tasks", async () => {
     const { index, getMarkdownFiles } = setup();
     await index.initialize();
     expect(getMarkdownFiles).toHaveBeenCalledOnce();
-    expect(index.projects()[0]).toMatchObject({ openTasks: 1, completedTasks: 2, archived: false });
+    expect(index.projects()[0]).toMatchObject({ openTasks: 1, completedTasks: 2 });
   });
 
-  it("reacts to adding and removing archived tags without hiding project tasks", async () => {
+  it("reads an archived tag as any other tag, and a note without the project tag as no project", async () => {
     const { index, setTags } = setup();
     await index.initialize();
     setTags(["project", "archived"]);
-    expect(index.projects()[0].archived).toBe(true);
+    expect(index.projects()[0]).not.toHaveProperty("archived");
     expect(index.query({ mode: "project", projectPath: "Project.md", showCompleted: true })).toHaveLength(3);
-    setTags(["project"]);
-    expect(index.projects()[0].archived).toBe(false);
     setTags(["archived"]);
     expect(index.projects()).toHaveLength(0);
   });

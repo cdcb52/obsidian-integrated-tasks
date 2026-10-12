@@ -131,7 +131,7 @@ A board's columns follow the view's grouping: a project's sections, Today's over
 
 ## Turn notes into projects
 
-![The Projects list, with active, completed and archived projects, their dates and deadlines](resources/images/projects-list.png)
+![The Projects list, with projects grouped by status, their dates and deadlines](resources/images/projects-list.png)
 
 A project is a note tagged `project`. Create one with **+** in the Projects view, run **Convert to project** on any note, or type a new name when you move a task to a project and choose **Create project**. Headings in the note become the project's sections.
 
@@ -143,15 +143,19 @@ date: 2026-08-10        # start date
 end date: 2027-02-26
 deadline: 2027-03-08
 priority: 3
+status: In progress     # To do, In progress, Waiting, Done or Cancelled
 color: purple           # or a hex colour such as "#3b82f6"
 parent: "[[Studio Admin]]"
+description: A short novel, drafted over the winter.
 ```
 
-You don't have to edit them by hand: the **…** beside a project's title, or a right-click on it in the Projects list, sets its priority, dates, deadline, parent, tags, colour and name, and can archive, open or delete it. Subprojects appear under their parent, and use its colour unless they have their own.
+You don't have to edit them by hand: the **…** beside a project's title, or a right-click on it in the Projects list, sets its status, priority, dates, deadline, parent, tags, colour and name, and can open or delete it. Subprojects appear under their parent, where you can fold them away, and use its colour unless they have their own. **Convert to project** adds all of these properties, empty, for you to fill in.
 
 ![A project page with its sections, start and end dates, deadline and progress, and the selected task in the sidebar](resources/images/project-page.png)
 
-Projects show their progress, counting subtasks. When every task is done the project moves to **Completed**, and adding an open task makes it active again. Archive a project from its **…** menu (or tag the note `archived`) to move it to **Archived** and out of the sidebar; its tasks stay in other views.
+Projects show their progress, counting subtasks. A project's `status` says where it stands; without one, it is **To do** until every task is done, then **Done**. Done and cancelled projects leave the sidebar, and their tasks stay in other views. In task mode a project's description shows in a card at the top of its page; click it to edit.
+
+The Projects view lists your projects grouped by status. Switch it to a board to drag projects between statuses, and use **View options** to filter, sort and group them as you would tasks.
 
 Turn on **Task mode** (in the task sidebar, the ribbon, or with **Toggle task mode**) to open project notes as task views. Turn it off to edit them as regular notes.
 
@@ -167,7 +171,7 @@ Switch the Projects view to **Gantt** to see your projects on a timeline. Choose
 
 You can keep writing and checking off tasks in your notes as usual. In Live Preview and Reading view, a task's dates, deadline, priority and other properties are highlighted in the colour of what they set, and the checkbox takes its priority's colour.
 
-- **Cmd/Ctrl-click a checkbox** to open the task. On mobile, press and hold it.
+- **Cmd/Ctrl-click a checkbox** to open the task.
 - With Task mode off, end a checklist line with a date in words, such as "Call the venue tomorrow", and it becomes a real date when you press Enter or leave the line.
 - With the note open, the Task details sidebar lists the note's tasks, so you can see and change their properties without touching the syntax.
 

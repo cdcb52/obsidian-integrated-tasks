@@ -14,7 +14,7 @@ beforeAll(() => {
   HTMLElement.prototype.releasePointerCapture ??= () => {};
 });
 
-const project = { path: "Site.md", name: "Site", openTasks: 1, completedTasks: 0, archived: false, scheduledDate: "2026-02-02", endDate: "2026-03-20" };
+const project = { path: "Site.md", name: "Site", openTasks: 1, completedTasks: 0, scheduledDate: "2026-02-02", endDate: "2026-03-20" };
 
 function setup(options: { scale?: number; zoom?: GanttZoom } = {}) {
   document.body.empty();

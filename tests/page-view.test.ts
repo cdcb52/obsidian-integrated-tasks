@@ -234,9 +234,9 @@ it("moves a card's task to the project picked from its project button, and close
   const { view, tasks, plugin, update } = selectionView();
   plugin.settings.inboxPath = "Inbox.md";
   const projects = [
-    { name: "Website", path: "Projects/Website.md", openTasks: 1, completedTasks: 0, archived: false, color: "#f00" },
-    { name: "Old", path: "Projects/Old.md", openTasks: 0, completedTasks: 0, archived: true },
-    { name: "Autumn", path: "Projects/Autumn.md", openTasks: 1, completedTasks: 0, archived: false, parentPath: "Projects/Studio.md" }
+    { name: "Website", path: "Projects/Website.md", openTasks: 1, completedTasks: 0, color: "#f00" },
+    { name: "Old", path: "Projects/Old.md", openTasks: 0, completedTasks: 0, status: "cancelled" as const },
+    { name: "Autumn", path: "Projects/Autumn.md", openTasks: 1, completedTasks: 0, parentPath: "Projects/Studio.md" }
   ];
   Object.assign(plugin.index, { projects: () => projects });
   const internals = view as unknown as { expanded?: { id: string; title: string; notes: string }; openProjectPicker(id: string, anchor: HTMLElement): void };
@@ -682,7 +682,8 @@ it("edits the task on the current editor line only when task mode is off", () =>
  it.each([
    [{ mode: "all", layout: "list" }, false],
    [{ mode: "all", layout: "kanban" }, false],
-   [{ mode: "projects", layout: "calendar" }, true],
+   // The Projects view has no calendar.
+   [{ mode: "projects", layout: "calendar" }, false],
    [{ mode: "projects", layout: "calendar", projectLayout: "gantt" }, false],
    [{ mode: "projects", pagePath: "Project.md", layout: "calendar" }, true],
    [{ mode: "tags", layout: "calendar" }, false],

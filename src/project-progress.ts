@@ -1,5 +1,5 @@
 import { isClosedStatus } from "./task-status";
-import type { Project, ProjectTotals } from "./types";
+import type { Project, ProjectTotals, TaskStatus } from "./types";
 
 /** A fixed outline with an inset pie fill, matching the project's completion ratio. */
 export function renderProjectProgress(parent: HTMLElement, project: Project, showPercentage = true): void {
@@ -19,15 +19,13 @@ export function renderProjectProgress(parent: HTMLElement, project: Project, sho
     if (showPercentage) progress.createSpan({ cls: "tm-project-percentage", text: `${percentage}%` });
 }
 
-export type ProjectStatus = "active" | "completed" | "archived";
-
 function subprojects(projects: Project[]): Map<string, Project[]> {
   const children = new Map<string, Project[]>();
   for (const project of projects) if (project.parentPath) children.set(project.parentPath, [...children.get(project.parentPath) ?? [], project]);
   return children;
 }
 
-/** Each project's open and completed tasks, its subprojects' included; an archived subproject's are left out. */
+/** Each project's open and completed tasks, its subprojects' included; a cancelled subproject's are left out. */
 export function projectTotals(projects: Project[]): Map<string, ProjectTotals> {
   const children = subprojects(projects);
   const totals = new Map<string, ProjectTotals>();
@@ -37,7 +35,7 @@ export function projectTotals(projects: Project[]): Map<string, ProjectTotals> {
     seen.add(project.path);
     const sum = { open: project.openTasks, completed: project.completedTasks };
     for (const child of children.get(project.path) ?? []) {
-      if (child.archived || seen.has(child.path)) continue;
+      if (child.status === "cancelled" || seen.has(child.path)) continue;
       const counts = total(child, seen);
       sum.open += counts.open;
       sum.completed += counts.completed;
@@ -50,24 +48,22 @@ export function projectTotals(projects: Project[]): Map<string, ProjectTotals> {
 }
 
 /**
- * Each project's status. As in Things, a project whose tasks are all done (100%) is completed, no longer active;
- * one with no tasks yet is still active, and so is one with an active subproject. A subproject's tasks count
- * towards its parent's, so a parent with none of its own completes with its subprojects. Archived outranks both.
+ * Each project's status: its `status` property, or without one, as in Things, Done once its tasks are all done (100%)
+ * and To do until then. One with no tasks yet is still To do, and so is one with a subproject still open. A
+ * subproject's tasks count towards its parent's, so a parent with none of its own is done with its subprojects.
  */
-export function projectStatuses(projects: Project[]): Map<string, ProjectStatus> {
+export function projectStatuses(projects: Project[]): Map<string, TaskStatus> {
   const children = subprojects(projects);
   const totals = projectTotals(projects);
-  const statuses = new Map<string, ProjectStatus>();
-  const status = (project: Project, seen: Set<string>): ProjectStatus => {
+  const statuses = new Map<string, TaskStatus>();
+  const status = (project: Project, seen: Set<string>): TaskStatus => {
     const known = statuses.get(project.path);
     if (known) return known;
-    if (seen.has(project.path)) return "active";
+    if (seen.has(project.path)) return "todo";
     seen.add(project.path);
     const { open, completed } = totals.get(project.path)!;
-    // A status property says it outright; otherwise a project is done once all its tasks and subprojects are.
-    const done = project.status ? isClosedStatus(project.status) : open === 0 && completed > 0
-      && !(children.get(project.path) ?? []).some(child => status(child, seen) === "active");
-    const result: ProjectStatus = project.archived ? "archived" : done ? "completed" : "active";
+    const result: TaskStatus = project.status ?? (open === 0 && completed > 0
+      && !(children.get(project.path) ?? []).some(child => !isClosedStatus(status(child, seen))) ? "done" : "todo");
     statuses.set(project.path, result);
     return result;
   };
@@ -75,8 +71,8 @@ export function projectStatuses(projects: Project[]): Map<string, ProjectStatus>
   return statuses;
 }
 
-/** The projects still in progress: neither archived nor completed. */
+/** The projects still in progress: neither done nor cancelled. */
 export function activeProjects(projects: Project[]): Project[] {
   const statuses = projectStatuses(projects);
-  return projects.filter(project => statuses.get(project.path) === "active");
+  return projects.filter(project => !isClosedStatus(statuses.get(project.path) ?? "todo"));
 }

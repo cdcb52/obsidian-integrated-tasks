@@ -32,81 +32,14 @@ export function handleRecurringTaskClick(event: MouseEvent, resolve: (checkbox: 
   event.stopImmediatePropagation();
 }
 
-/** Share gesture handling between Live Preview and Reading view. */
+/** Share click handling between Live Preview and Reading view: Cmd/Ctrl-click opens a task, and a click completes a repeat. */
 export function bindNoteTaskEdit(root: HTMLElement, resolve: (checkbox: HTMLElement) => Task | undefined, open: OpenTask, complete?: (task: Task) => boolean, reopen?: (task: Task) => boolean): () => void {
-  const window = root.win;
-  let timer: number | undefined;
-  let press: { checkbox: HTMLElement; id: number; x: number; y: number } | undefined;
-  let held: HTMLElement | undefined;
-  let suppressUntil = 0;
-  const cancel = (): void => {
-    window.clearTimeout(timer);
-    timer = undefined;
-    press = undefined;
-  };
-  const block = (event: Event): void => {
-    event.preventDefault();
-    event.stopImmediatePropagation();
-  };
-  const start = (event: TouchEvent): void => {
-    cancel();
-    held = undefined;
-    if (event.touches.length !== 1) return;
-    const checkbox = (event.target as HTMLElement | null)?.closest?.<HTMLElement>('input[type="checkbox"]');
-    if (!checkbox || !resolve(checkbox)) return;
-    const touch = event.touches[0];
-    press = { checkbox, id: touch.identifier, x: touch.clientX, y: touch.clientY };
-    timer = window.setTimeout(() => {
-      if (!press || !checkbox.isConnected) return;
-      const task = resolve(checkbox);
-      if (!task) return;
-      held = checkbox;
-      suppressUntil = Date.now() + 1500;
-      cancel();
-      open(task);
-    }, 500);
-  };
-  const move = (event: TouchEvent): void => {
-    if (!press) return;
-    const touch = Array.from(event.touches).find(touch => touch.identifier === press!.id);
-    if (event.touches.length !== 1 || !touch || Math.hypot(touch.clientX - press.x, touch.clientY - press.y) > 10) cancel();
-  };
-  const end = (event: TouchEvent): void => {
-    cancel();
-    if (held && event.target === held) {
-      suppressUntil = Date.now() + 1500;
-      block(event);
-    }
-  };
   const click = (event: MouseEvent): void => {
-    if (held && Date.now() <= suppressUntil && event.target === held) {
-      block(event);
-      held = undefined;
-      return;
-    }
     handleTaskEditClick(event, resolve, open);
     handleRecurringTaskClick(event, resolve, complete, reopen);
   };
-  const contextMenu = (event: MouseEvent): void => {
-    if (event.target === press?.checkbox || (event.target === held && Date.now() <= suppressUntil)) block(event);
-  };
-  const document = root.ownerDocument;
   root.addEventListener("click", click, true);
-  root.addEventListener("touchstart", start, { capture: true, passive: true });
-  root.addEventListener("contextmenu", contextMenu, true);
-  document.addEventListener("touchmove", move, { capture: true, passive: true });
-  document.addEventListener("touchend", end, { capture: true, passive: false });
-  document.addEventListener("touchcancel", cancel, true);
-  return () => {
-    cancel();
-    held = undefined;
-    root.removeEventListener("click", click, true);
-    root.removeEventListener("touchstart", start, true);
-    root.removeEventListener("contextmenu", contextMenu, true);
-    document.removeEventListener("touchmove", move, true);
-    document.removeEventListener("touchend", end, true);
-    document.removeEventListener("touchcancel", cancel, true);
-  };
+  return () => root.removeEventListener("click", click, true);
 }
 
 export function noteTaskEditEditor(getDateFormat: () => string, open: OpenTask, getSectionHeadingLevel: () => number = () => 1, complete?: (task: Task) => boolean) {
@@ -156,7 +89,7 @@ function sectionTasks(path: string, text: string, format: string, level: number)
 }
 
 export function registerNoteTaskEdit(root: HTMLElement, context: MarkdownPostProcessorContext, getDateFormat: () => string, open: OpenTask, getSectionHeadingLevel: () => number = () => 1, complete?: (task: Task) => boolean, reopen?: (task: Task) => boolean): void {
-  // Most rendered sections have no checklist; they need no listeners (three of them on the document).
+  // Most rendered sections have no checklist; they need no listener.
   if (!root.matches?.("li.task-list-item") && !root.querySelector?.("li.task-list-item")) return;
   const child = new MarkdownRenderChild(root);
   context.addChild(child);

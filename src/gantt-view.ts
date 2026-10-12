@@ -5,7 +5,8 @@ import { projectHierarchy } from "./project-hierarchy";
 import { ganttSegments, ganttZoomFor, shiftGantt, GANTT_MAX_SCALE, GANTT_MIN_SCALE, ganttDateAt, ganttSelection, ganttRange, resizeProjectDate, GANTT_ZOOMS, type GanttZoom, type GanttHandle, type ProjectDateField } from "./gantt";
 import type { Project } from "./types";
 import type { ProjectDraft } from "./project-creator";
-import { projectStatuses, renderProjectProgress, type ProjectStatus } from "./project-progress";
+import { projectStatuses, renderProjectProgress } from "./project-progress";
+import { STATUS_LABELS, TASK_STATUSES } from "./task-status";
 import { renderProjectDeadline } from "./project-header-details";
 import { renderThingsProjectDeadline } from "./things-row-details";
 
@@ -219,9 +220,9 @@ export function renderGantt(container: HTMLElement, options: GanttOptions): void
     } finally { busy = false; root.removeAttribute("aria-busy"); }
   };
   const statuses = projectStatuses(options.projects);
-  const groups: Array<[ProjectStatus, string]> = [["active", "Active"], ["completed", "Completed"], ["archived", "Archived"]];
-  const grouped = groups.flatMap(([status, group]) => projectHierarchy(options.projects.filter(project => statuses.get(project.path) === status))
-    .map(entry => ({ ...entry, group })));
+  // Grouped by status, as the Projects list is; a status no project has takes no row.
+  const grouped = TASK_STATUSES.flatMap(status => projectHierarchy(options.projects.filter(project => statuses.get(project.path) === status))
+    .map(entry => ({ ...entry, group: STATUS_LABELS[status] })));
   let previousGroup = "";
   for (const { project, depth, group } of grouped) {
     if (group !== previousGroup) {
@@ -230,7 +231,8 @@ export function renderGantt(container: HTMLElement, options: GanttOptions): void
       heading.createDiv({ cls: "tm-gantt-track", attr: { "aria-hidden": "true" } });
       previousGroup = group;
     }
-    const row = scroll.createDiv({ cls: `tm-gantt-row${project.archived ? " is-archived" : statuses.get(project.path) === "completed" ? " is-completed" : ""}` });
+    const status = statuses.get(project.path);
+    const row = scroll.createDiv({ cls: `tm-gantt-row${status === "done" ? " is-completed" : status === "cancelled" ? " is-cancelled" : ""}` });
     const label = row.createDiv({ cls: "tm-gantt-label tm-gantt-project" });
     label.style.paddingLeft = `${12 + depth * 16}px`;
     const icon = label.createSpan({ cls: "tm-project-icon" });

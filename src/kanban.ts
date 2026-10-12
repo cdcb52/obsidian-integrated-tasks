@@ -5,7 +5,7 @@ import type { Task, TaskGrouping } from "./types";
 
 const deferRank = (title: string): number => title === "Not hidden" ? 2 : title === "Someday" ? 1 : 0;
 
-export interface KanbanColumn { title: string; tasks: Task[]; target?: ListDropGroup }
+export interface KanbanColumn { title: string; tasks: Task[]; target?: ListDropGroup; alert?: boolean }
 export function kanbanColumns(tasks: Task[], grouping: TaskGrouping): KanbanColumn[] {
   if (grouping === "none") return [{ title: "Tasks", tasks }];
   const property = grouping === "default" ? "section" : grouping;

@@ -55,13 +55,13 @@ import type { Project } from "../src/types";
 
 beforeAll(() => installObsidianDom());
 
-const project = (name: string, archived = false): Project => ({ path: `Projects/${name}.md`, name, archived, openTasks: 0, completedTasks: 0 });
+const project = (name: string, status?: Project["status"]): Project => ({ path: `Projects/${name}.md`, name, status, openTasks: 0, completedTasks: 0 });
 
 function host(taskCount = 2) {
   const tasks = scanTasks("Notes/Work.md", Array.from({ length: taskCount }, (_, i) => `- [ ] Task ${i}`).join("\n"));
   const query = vi.fn(() => tasks);
   return {
-    index: { projects: () => [project("Old", true), project("Launch"), { ...project("Shipped"), completedTasks: 2 }], tagSummaries: () => [{ name: "#work", openTasks: 1, completedTasks: 0 }], query },
+    index: { projects: () => [project("Old", "cancelled"), project("Launch"), { ...project("Shipped"), completedTasks: 2 }], tagSummaries: () => [{ name: "#work", openTasks: 1, completedTasks: 0 }], query },
     settings: { smartLists: [{ id: "focus", name: "Focus", filters: [], sort: "date", descending: false, grouping: "none" }] },
     openTaskView: vi.fn().mockResolvedValue(undefined),
     openProject: vi.fn().mockResolvedValue(undefined),
@@ -74,14 +74,14 @@ type Host = ReturnType<typeof host>;
 const switcher = (plugin: Host) => new TaskQuickSwitcher({} as App, plugin as unknown as TaskManagerPlugin);
 
 describe("quick switcher items", () => {
-  it("lists views, then active and archived projects, tags, smart lists, and open tasks with their note", () => {
+  it("lists views, then open, done and cancelled projects, tags, smart lists, and open tasks with their note", () => {
     const plugin = host();
     const items = switcherItems(plugin as unknown as TaskManagerPlugin);
     expect(items.map(item => `${item.kind}:${item.label}`)).toEqual([
       "view:Inbox", "view:Today", "view:Upcoming", "view:All tasks", "view:Projects", "view:Tags", "view:Smart lists",
       "project:Launch", "project:Shipped", "project:Old", "tag:#work", "smartList:Focus", "task:Task 0", "task:Task 1"
     ]);
-    expect(items.find(item => item.label === "Old")).toMatchObject({ status: "archived" });
+    expect(items.find(item => item.label === "Old")).toMatchObject({ status: "cancelled" });
     expect(items.at(-1)).toMatchObject({ kind: "task", note: "Work" });
     expect(plugin.index.query).toHaveBeenCalledWith({ mode: "all", showCompleted: false });
   });
@@ -116,8 +116,8 @@ describe("quick switcher items", () => {
     expect(task.querySelector(".suggestion-title")?.textContent).toBe("Task 0");
     expect(task.querySelector(".suggestion-note")?.textContent).toBe("Work");
     expect(task.querySelector(".suggestion-aux")?.textContent).toBe("Task");
-    expect(render(items.find(item => item.label === "Old")!).querySelector(".suggestion-aux")?.textContent).toBe("Archived project");
-    expect(render(items.find(item => item.label === "Shipped")!).querySelector(".suggestion-aux")?.textContent).toBe("Completed project");
+    expect(render(items.find(item => item.label === "Old")!).querySelector(".suggestion-aux")?.textContent).toBe("Cancelled project");
+    expect(render(items.find(item => item.label === "Shipped")!).querySelector(".suggestion-aux")?.textContent).toBe("Done project");
     expect(render(items[0]).querySelector(".suggestion-note")).toBeNull();
   });
 });

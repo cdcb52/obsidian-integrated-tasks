@@ -1,14 +1,15 @@
 import { FuzzySuggestModal, Notice, renderResults, setIcon, type App, type FuzzyMatch } from "obsidian";
 import type TaskManagerPlugin from "./main";
-import type { Task, TaskViewMode } from "./types";
-import { projectStatuses, type ProjectStatus } from "./project-progress";
+import type { Task, TaskStatus, TaskViewMode } from "./types";
+import { projectStatuses } from "./project-progress";
+import { STATUS_LABELS, TASK_STATUSES, isClosedStatus } from "./task-status";
 
 /** Fuzzy matching every open task on each keystroke is too slow in very large vaults. */
 export const SWITCHER_TASK_LIMIT = 5000;
 
 export type SwitcherItem =
   | { kind: "view"; label: string; icon: string; mode: TaskViewMode }
-  | { kind: "project"; label: string; path: string; status: ProjectStatus }
+  | { kind: "project"; label: string; path: string; status: TaskStatus }
   | { kind: "tag"; label: string; name: string }
   | { kind: "smartList"; label: string; id: string }
   | { kind: "task"; label: string; task: Task; note: string };
@@ -28,7 +29,8 @@ export function switcherItems(plugin: SwitcherHost, taskLimit = SWITCHER_TASK_LI
   const items: SwitcherItem[] = VIEWS.map(([mode, label, icon]) => ({ kind: "view", label, icon, mode }));
   const projects = plugin.index.projects();
   const statuses = projectStatuses(projects);
-  for (const status of ["active", "completed", "archived"] as const) {
+  // Open projects first, then done and cancelled ones.
+  for (const status of [...TASK_STATUSES.filter(status => !isClosedStatus(status)), "done", "cancelled"] as const) {
     for (const project of projects) if (statuses.get(project.path) === status) items.push({ kind: "project", label: project.name, path: project.path, status });
   }
   for (const tag of plugin.index.tagSummaries()) items.push({ kind: "tag", label: tag.name, name: tag.name });
@@ -42,7 +44,7 @@ export function switcherItems(plugin: SwitcherHost, taskLimit = SWITCHER_TASK_LI
 const ICONS: Record<Exclude<SwitcherItem["kind"], "view">, string> = { project: "target", tag: "hash", smartList: "list-filter", task: "circle" };
 
 function kindLabel(item: SwitcherItem): string {
-  if (item.kind === "project") return { active: "Project", completed: "Completed project", archived: "Archived project" }[item.status];
+  if (item.kind === "project") return isClosedStatus(item.status) ? `${STATUS_LABELS[item.status]} project` : "Project";
   return { view: "View", tag: "Tag", smartList: "Smart list", task: "Task" }[item.kind];
 }
 

@@ -9,7 +9,7 @@ beforeAll(() => installObsidianDom());
 afterEach(() => { document.body.innerHTML = ""; });
 
 function gantt() {
-  const project: Project = { path: "Site.md", name: "Site", openTasks: 1, completedTasks: 0, archived: false, scheduledDate: "2026-10-01", endDate: "2026-10-20" };
+  const project: Project = { path: "Site.md", name: "Site", openTasks: 1, completedTasks: 0, scheduledDate: "2026-10-01", endDate: "2026-10-20" };
   const menu = vi.fn();
   const container = document.body.createDiv();
   renderGantt(container, { projects: [project], anchor: "2026-10-01", zoom: "month", dateFormat: "YYYY-MM-DD", navigate: vi.fn(), open: vi.fn(), update: vi.fn(), menu });

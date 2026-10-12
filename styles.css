@@ -633,7 +633,7 @@ button.tm-calendar-slot:hover { background: var(--background-modifier-hover); }
   padding-bottom: 16px;
 }
 
-.is-calendar-view > .tm-view-header { flex-shrink: 0; }
+.is-calendar-view > :is(.tm-view-header, .tm-project-description) { flex-shrink: 0; }
 .is-calendar-view > .tm-task-results { flex: 1; min-height: 0; overflow: hidden; }
 .is-calendar-view .tm-calendar { height: 100%; min-height: 0; display: flex; flex-direction: column; }
 .is-calendar-view .tm-calendar-toolbar { flex-shrink: 0; }
@@ -838,7 +838,7 @@ button.tm-list-drag-handle { touch-action: none; }
 .tm-kanban { display: flex; align-items: stretch; gap: 16px; overflow-x: auto; padding: 4px 2px 16px; min-height: 320px; }
 .tm-kanban-column { flex: 1 0 280px; min-width: 280px; max-width: 360px; background: transparent; border: 0; border-radius: 10px; padding: 12px; }
 .tm-kanban-column-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-.tm-kanban-column-header h2 { font-size: var(--font-ui-medium); color: var(--text-normal); margin: 0; overflow-wrap: anywhere; flex: 1; }
+.tm-kanban-column-header h2 { font-size: var(--font-ui-medium); font-weight: var(--font-semibold); color: var(--text-normal); margin: 0; overflow-wrap: anywhere; flex: 1; }
 .tm-kanban .tm-task-list { display: flex; flex-direction: column; gap: 8px; min-height: 48px; }
 .tm-kanban .tm-task-row { grid-template-columns: 24px minmax(0, 1fr); align-items: start; padding: 10px; min-height: 72px; background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 6px; margin-left: min(calc(var(--tm-depth) * 10px), 30px); }
 .tm-kanban .tm-task-content { display: flex; flex-direction: column; align-items: stretch; min-width: 0; gap: 8px; text-align: left; }
@@ -901,7 +901,7 @@ button.tm-gantt-bar {
   background: color-mix(in srgb, var(--tm-project-color, var(--interactive-accent)) 12%, var(--background-primary)); color: var(--text-normal);
   font-size: var(--font-ui-small); text-align: left; justify-content: flex-start; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
 }
-.tm-gantt-row.is-completed .tm-gantt-bar { opacity: .55; text-decoration: line-through; }
+.tm-gantt-row:is(.is-completed, .is-cancelled) .tm-gantt-bar { opacity: .55; text-decoration: line-through; }
 .tm-gantt-today { position: absolute; top: 0; bottom: 0; border-left: 2px solid var(--text-error); pointer-events: none; z-index: 3; }
 .tm-gantt-undated { display: inline-block; padding: 4px 12px; font-size: var(--font-ui-small); color: var(--text-muted); }
 button.tm-gantt-jump { margin: 4px 8px; height: 28px; font-size: var(--font-ui-small); }
@@ -912,7 +912,7 @@ button.tm-gantt-handle { position: absolute; top: 4px; height: 28px; width: 8px;
 button.tm-gantt-handle:hover { opacity: 1; outline: none; box-shadow: none; }
 button.tm-gantt-handle:focus-visible { opacity: 1; outline: 2px solid var(--text-accent); }
 .tm-gantt-row.is-resizing .tm-gantt-bar { opacity: .8; }
-.tm-gantt-row.is-archived .tm-gantt-label, .tm-gantt-row.is-completed .tm-gantt-label { color: var(--text-muted); }
+.tm-gantt-row:is(.is-completed, .is-cancelled) .tm-gantt-label { color: var(--text-muted); }
 
 /* Edge grips stay unobtrusive until the project row is hovered or focused. */
 button.tm-gantt-handle.is-start, button.tm-gantt-handle.is-finish { opacity: 0; }
@@ -1120,6 +1120,11 @@ button.tm-gantt-handle.is-finish:focus-visible,
   color: var(--text-accent);
 }
 .tm-main-view.tm-style-griply .tm-section.is-alert h2 { color: var(--text-error); }
+/* A board's columns head their cards as a list's groups do, and its cards are shaded as the layout switcher is. */
+.tm-main-view.tm-style-griply .tm-kanban-column-header { padding-bottom: var(--size-4-2); border-bottom: 1px solid var(--background-modifier-border); }
+.tm-main-view.tm-style-griply .tm-kanban-column-header h2 { color: var(--text-accent); }
+.tm-main-view.tm-style-griply .tm-kanban-column.is-alert .tm-kanban-column-header h2 { color: var(--text-error); }
+.tm-main-view.tm-style-griply .tm-kanban .tm-task-row:not(.is-selected) { background: var(--background-modifier-hover); }
 .tm-main-view.tm-style-griply button.tm-group-fold {
   position: static;
   order: 99;
@@ -1913,6 +1918,9 @@ body.is-phone .tm-main-view.tm-style-things .tm-task-row.tm-task-item:not(.tm-pr
 }
 .tm-main-view.tm-style-things .tm-section.is-alert h2 { color: var(--text-error); }
 .tm-main-view.tm-style-things .tm-section h2 .tm-section-count { background: none; padding: 0; color: var(--text-faint); }
+.tm-main-view.tm-style-things .tm-kanban-column-header { padding: 0 8px 5px; border-bottom: 1px solid var(--background-modifier-border); }
+.tm-main-view.tm-style-things .tm-kanban-column-header h2 { color: var(--text-accent); font-weight: var(--font-bold); }
+.tm-main-view.tm-style-things .tm-kanban-column.is-alert .tm-kanban-column-header h2 { color: var(--text-error); }
 
 /* Selection: a rounded block in the text selection colour; consecutive selected rows join into one. */
 .tm-main-view.tm-style-things .tm-task-row.tm-task-item.is-selected {
@@ -2674,14 +2682,13 @@ button.tm-options-update:disabled { color: var(--text-faint); cursor: default; }
 .tm-project-status.is-waiting .tm-task-detail-icon { color: var(--color-orange); }
 .tm-things-trailing .tm-project-status { margin-inline-end: 8px; color: var(--text-muted); }
 
-/* A project page's description, in a card under its properties. */
-.tm-title-group:has(> div > .tm-project-description:not([hidden])),
-.tm-title-group > div:has(> .tm-project-description:not([hidden])) { flex: 1 1 auto; min-width: 0; }
+/* A project page's description, in a card under the whole header, shaded as the layout switcher is. */
+.tm-view-header:has(+ .tm-project-description:not([hidden])) { margin-bottom: var(--size-4-3); }
 .tm-project-description {
-  margin-top: var(--size-4-3);
+  margin-bottom: var(--size-4-8);
   padding: var(--size-4-3) var(--size-4-4);
   border-radius: var(--radius-m);
-  background: var(--background-secondary);
+  background: var(--background-modifier-hover);
   color: var(--text-normal);
   font-size: var(--font-ui-medium);
   line-height: var(--line-height-normal);

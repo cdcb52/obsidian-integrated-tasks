@@ -15,7 +15,7 @@ class Element {
     setAttribute(key: string, value: string) { this.attrs[key] = value; }
     addEventListener(type: string, fn: (event: unknown) => void) { this.handlers.set(type, fn); }
 }
-const project: Project = { path: "Launch.md", name: "Launch", openTasks: 3, completedTasks: 1, archived: false };
+const project: Project = { path: "Launch.md", name: "Launch", openTasks: 3, completedTasks: 1 };
 it("hides only the current year", () => {
     expect(projectDateLabel("2026-09-19", now)).toBe("Sep 19");
     expect(projectDateLabel("2027-01-10", now)).toBe("Jan 10, 2027");

@@ -26,8 +26,7 @@ export function projectEditDraft(project: Project, frontmatter: Record<string, u
     name: project.name, date: scalar("date"), endDate: scalar("end date"), deadline: scalar("deadline"),
     priority: project.priority ? String(project.priority) : "",
     parent: project.parentPath ?? project.parent ?? "",
-    tags: tags.map(tag => tag.replace(/^#/, "")).filter(tag => tag && tag !== "archived").join(", "),
-    archived: project.archived,
+    tags: tags.map(tag => tag.replace(/^#/, "")).filter(Boolean).join(", "),
     // An unrecognised value stays as it is unless another colour is chosen.
     color: value("color") === undefined ? "" : projectColorName(value("color"))
     // No status: it stays as written (any spelling, or one not recognised) unless another is chosen.

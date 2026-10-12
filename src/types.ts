@@ -58,9 +58,8 @@ export interface Project extends ProjectProperties {
   headings?: import("./structure").NoteHeading[];
   openTasks: number;
   completedTasks: number;
-  /** Its tasks together with its subprojects' (archived ones aside), which its progress ring shows. */
+  /** Its tasks together with its subprojects' (cancelled ones aside), which its progress ring shows. */
   totals?: ProjectTotals;
-  archived: boolean;
 }
 
 export interface ProjectTotals { open: number; completed: number }
@@ -133,7 +132,7 @@ export interface SmartList {
   scope?: SmartListScope;
 }
 
-/** How a task view lays its tasks out (list, calendar or board), or the Projects list its projects (list or Gantt). */
+/** How a task view lays its tasks out (list, calendar or board), or the Projects view its projects (list, board or Gantt). */
 export type ViewLayout = "list" | "calendar" | "kanban" | "gantt";
 
 /** A view's calendar and Gantt periods, kept between visits: the calendar's scope, and the Gantt's zoom (or the range it was zoomed to). */
@@ -197,7 +196,7 @@ export interface TaskManagerSettings {
   viewOptions: Record<string, SavedViewOptions>;
   /** Each view's layout other than a list, by view as for its options, plus "smartList:<id>" and "projects" (the Projects list's). */
   viewLayouts: Record<string, ViewLayout>;
-  /** Each view's calendar scope and Gantt range other than the defaults (a month; a year), by view as for its layout. */
+  /** Each view's calendar scope and Gantt range other than the defaults (a month, or four days on a phone; a year), by view as for its layout. */
   viewPeriods: Record<string, ViewPeriod>;
   /** Folders and notes whose tasks are left out of every view. */
   ignoredPaths: string[];

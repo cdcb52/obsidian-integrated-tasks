@@ -520,7 +520,7 @@ export default class TaskManagerPlugin extends Plugin {
 
   /** Writes a new project note (a name alone is enough) and indexes it; returns its path. */
   async createProjectNote(draft: Partial<ProjectDraft> & { name: string }): Promise<string> {
-    const full: ProjectDraft = { date: "", endDate: "", deadline: "", priority: "", parent: "", tags: "", archived: false, ...draft };
+    const full: ProjectDraft = { date: "", endDate: "", deadline: "", priority: "", parent: "", tags: "", ...draft };
     const folder = this.settings.projectFolder;
     const path = (folder ? `${folder}/` : "") + projectNotePath(full.name);
     if (this.app.vault.getAbstractFileByPath(path)) throw new Error("A note with this name already exists.");

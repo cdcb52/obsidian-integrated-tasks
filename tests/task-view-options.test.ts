@@ -26,24 +26,10 @@ class Element extends EventTarget {
 
 // The view options panel itself is covered in view-options.test.ts.
 
-it.each([true, false])("lists archived projects in a group of their own in the Projects list (active projects: %s)", hasActive => {
-  const archived = { path: "Archive.md", name: "Archive", archived: true, openTasks: 0, completedTasks: 1 };
-  const active = { ...archived, path: "Active.md", name: "Active", archived: false, openTasks: 1 };
+it("makes a project from the Projects view's add button", () => {
   const openProjectCreator = vi.fn();
-  const projects = hasActive ? [active, archived] : [archived];
-  const view = new TaskMainView({} as WorkspaceLeaf, { openProjectCreator, index: { projects: () => projects } } as unknown as TaskManagerPlugin);
-  const internal = view as unknown as {
-    state: { mode: string }; shownProjects: Map<string, unknown>;
-    renderProjectGroups(root: HTMLElement, items: unknown[]): void; renderProjectGroup(root: HTMLElement, title: string, projects: unknown[]): void;
-  };
-  internal.state = { mode: "projects" };
-  for (const project of projects) internal.shownProjects.set(`project:${project.path}`, project);
-  const groups = vi.spyOn(internal, "renderProjectGroup").mockImplementation(() => {});
-  const root = new Element();
-  internal.renderProjectGroups(root as never, projects.map(project => ({ id: `project:${project.path}` })));
-  expect(groups).toHaveBeenCalledWith(root, "Archived", [archived], undefined);
-  expect(groups).toHaveBeenCalledWith(root, "Active", hasActive ? [active] : [], undefined);
-  // Its add button makes a project.
+  const view = new TaskMainView({} as WorkspaceLeaf, { openProjectCreator, index: { projects: () => [] } } as unknown as TaskManagerPlugin);
+  (view as unknown as { state: { mode: string } }).state = { mode: "projects" };
   view.newTask();
   expect(openProjectCreator).toHaveBeenCalledOnce();
 });

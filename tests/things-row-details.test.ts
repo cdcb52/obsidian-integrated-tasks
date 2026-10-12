@@ -142,7 +142,7 @@ describe("Things task row", () => {
 describe("Things project row", () => {
   function projectRow(properties: Partial<Project>, datesBelow = false) {
     const lead = document.createElement("span"), inline = document.createElement("div"), secondary = document.createElement("div");
-    const project: Project = { name: "New Project", path: "Projects/New Project.md", openTasks: 0, completedTasks: 0, archived: false, ...properties };
+    const project: Project = { name: "New Project", path: "Projects/New Project.md", openTasks: 0, completedTasks: 0, ...properties };
     const edit = vi.fn();
     renderThingsProjectDetails({ lead, inline, secondary }, project, { dateFormat: "MMM D, YYYY", now, edit, datesBelow });
     return { lead, inline, secondary, edit };

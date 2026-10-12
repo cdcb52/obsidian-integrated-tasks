@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { projectHierarchy } from "../src/project-hierarchy";
 import { parseProjectParent } from "../src/project-properties";
 import type { Project } from "../src/types";
-const project = (name: string, parentPath?: string): Project => ({ name, path: `${name}.md`, parentPath, archived: false, openTasks: 0, completedTasks: 0 });
+const project = (name: string, parentPath?: string): Project => ({ name, path: `${name}.md`, parentPath, openTasks: 0, completedTasks: 0 });
 const rows = (projects: Project[]) => projectHierarchy(projects).map(({ project, depth }) => [project.name, depth]);
 describe("project hierarchy", () => {
   it("orders nested children after parents regardless of their alphabetical position", () => {

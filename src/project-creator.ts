@@ -13,7 +13,6 @@ export interface ProjectDraft {
   priority: string;
   parent: string;
   tags: string;
-  archived: boolean;
   /** A colour name or hex; "" removes the property and undefined leaves it unchanged. */
   color?: string;
   /** A task status ("doing"…); "" removes the property and undefined leaves it unchanged. */
@@ -58,9 +57,9 @@ export class ProjectCreatorModal extends Modal {
     for (const project of this.options.projects) parent.createEl("option", { value: project.path, text: project.path.replace(/\.md$/i, "") });
     const tags = field("Tags", "input", "project, work");
     tags.value = "project";
-    const archiveRow = content.createEl("label", { cls: "tm-toggle" });
-    const archived = archiveRow.createEl("input", { type: "checkbox", attr: { "aria-label": "Archived" } });
-    archiveRow.createSpan({ text: "Archived" });
+    const status = field("Status", "select");
+    status.createEl("option", { value: "", text: "No status" });
+    for (const value of TASK_STATUSES) status.createEl("option", { value, text: STATUS_LABELS[value] });
     const colorRow = content.createDiv({ cls: "tm-editor-field" });
     const colorLabel = colorRow.createEl("label", { text: "Color" });
     let color: string | undefined;
@@ -73,7 +72,7 @@ export class ProjectCreatorModal extends Modal {
     const submit = async (): Promise<void> => {
       if (create.disabled) return;
       const draft = { name: name.value, date: date.value, endDate: endDate.value, deadline: deadline.value,
-        priority: priority.value, parent: parent.value, tags: tags.value, archived: archived.checked, color };
+        priority: priority.value, parent: parent.value, tags: tags.value, status: status.value, color };
       create.disabled = cancel.disabled = true;
       try {
         projectNoteContent(draft, this.options.dateFormat, this.options.linkDates);
@@ -178,8 +177,7 @@ export function projectDraftProperties(draft: ProjectDraft, dateFormat: string, 
   if (draft.color && !color) throw new Error("Enter a color as a hex value such as #3366ff.");
   const status = draft.status ? (TASK_STATUSES as readonly string[]).includes(draft.status) ? STATUS_LABELS[draft.status as TaskStatus] : undefined : undefined;
   if (draft.status && !status) throw new Error("Select a valid status.");
-  const tags = [...new Set(["project", ...draft.tags.split(/[,\s]+/).map(tag => tag.replace(/^#/, "")).filter(tag => Boolean(tag) && tag !== "archived")])];
-  if (draft.archived && !tags.includes("archived")) tags.push("archived");
+  const tags = [...new Set(["project", ...draft.tags.split(/[,\s]+/).map(tag => tag.replace(/^#/, "")).filter(Boolean)])];
   return {
     tags, date: date(draft.date, "start date"), "end date": date(draft.endDate, "end date"),
     deadline: date(draft.deadline, "deadline"), priority: draft.priority ? Number(draft.priority) : null,

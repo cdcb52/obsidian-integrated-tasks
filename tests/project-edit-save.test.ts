@@ -21,7 +21,7 @@ it("saves to the existing note, preserves its folder on rename, and refuses name
     workspace: { getLeavesOfType: () => [], getMostRecentLeaf: () => null }
   } as unknown as App;
   const refreshPath = vi.fn();
-  plugin.index = { projects: () => [{ path: file.path, name: "Launch", openTasks: 1, completedTasks: 0, archived: false }], refreshPath } as unknown as TaskIndex;
+  plugin.index = { projects: () => [{ path: file.path, name: "Launch", openTasks: 1, completedTasks: 0 }], refreshPath } as unknown as TaskIndex;
   vi.spyOn(plugin, "dateFormat").mockReturnValue("YYYY-MM-DD");
   vi.spyOn(plugin, "openProject").mockResolvedValue(undefined);
   await expect(plugin.updateProject(file.path, draft => ({ ...draft, name: "Taken" }))).rejects.toThrow("already exists");

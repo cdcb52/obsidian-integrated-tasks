@@ -48,7 +48,8 @@ describe("Reading view task resolution", () => {
     const text = "# Tasks\n- [ ] First p1\n- [ ] Second 2026-09-30\n- [x] Third";
     const { click, open, context, document } = section(text, [1, 2, 3]);
     expect(context.addChild).toHaveBeenCalledOnce();
-    expect(document.addEventListener).toHaveBeenCalledTimes(3);
+    // Clicks only: nothing listens on the document (a long press opens nothing).
+    expect(document.addEventListener).not.toHaveBeenCalled();
     click(0);
     click(1);
     click(2);

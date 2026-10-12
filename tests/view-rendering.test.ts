@@ -69,7 +69,7 @@ async function setup(notes: Array<[string, string]>, frontmatter: Record<string,
     settings: { ...DEFAULT_SETTINGS, taskDetails: "view" }, index, store, dateFormat: () => "YYYY-MM-DD",
     openEditor: vi.fn(), openTaskView: vi.fn(), undoTaskChange: vi.fn(), redoTaskChange: vi.fn(), openQuickSwitcher: vi.fn(), saveSettings: vi.fn(),
     showInTaskSidebar: vi.fn().mockResolvedValue(undefined),
-    projectDraft: vi.fn(() => ({ name: "Site", date: "", endDate: "", deadline: "", priority: "", parent: "", tags: "work", archived: false, color: "" })),
+    projectDraft: vi.fn(() => ({ name: "Site", date: "", endDate: "", deadline: "", priority: "", parent: "", tags: "work", color: "" })),
     updateProject: vi.fn().mockResolvedValue("Site.md"), deleteProject: vi.fn().mockResolvedValue(undefined)
   };
   const view = new TaskMainView({ app } as unknown as WorkspaceLeaf, plugin as unknown as TaskManagerPlugin);
@@ -683,7 +683,7 @@ it("shows the tag list's empty message outside the list", async () => {
 });
 
 describe("project actions", () => {
-  const blank = { name: "Site", date: "", endDate: "", deadline: "", priority: "", parent: "", tags: "work", archived: false, color: "" };
+  const blank = { name: "Site", date: "", endDate: "", deadline: "", priority: "", parent: "", tags: "work", color: "" };
   const menuButton = (label: string) => Array.from(document.querySelectorAll<HTMLElement>(".tm-task-menu button"))
     .find(button => button.getAttribute("aria-label") === label || button.querySelector(".tm-task-menu-label")?.textContent === label)!;
   /** Applies the last change sent to updateProject to a blank draft. */
@@ -697,7 +697,7 @@ describe("project actions", () => {
     more.click();
     expect(more.getAttribute("aria-expanded")).toBe("true");
     const labels = Array.from(document.querySelectorAll(".tm-task-menu button")).map(button => button.getAttribute("aria-label") ?? button.querySelector(".tm-task-menu-label")?.textContent);
-    expect(labels).toEqual(["P1", "P2", "P3", "Status", "Start date", "End date", "Deadline", "Parent project", "Tags", "Color", "Rename", "Archive project", "Add description", "Open note", "Delete project"]);
+    expect(labels).toEqual(["P1", "P2", "P3", "Status", "Start date", "End date", "Deadline", "Parent project", "Tags", "Color", "Rename", "Add description", "Open note", "Delete project"]);
     menuButton("P1").click();
     expect(plugin.updateProject.mock.lastCall![0]).toBe("Site.md");
     expect(lastChange(plugin).priority).toBe("1");
@@ -802,12 +802,12 @@ describe("View options › Projects", () => {
     const today = todayIso();
     const { view, content, plugin } = await setup(
       [["Loose.md", `- [ ] Call ${today}`], note("Launch.md", 1), note("Site.md", 1), note("Old.md", 1)],
-      { "Launch.md": { tags: ["project"], deadline: today }, "Site.md": { tags: ["project"] }, "Old.md": { tags: ["project", "archived"] } }
+      { "Launch.md": { tags: ["project"], deadline: today }, "Site.md": { tags: ["project"] }, "Old.md": { tags: ["project"], status: "Cancelled" } }
     );
     Object.assign(plugin, { projectDraft: () => ({ tags: "" }) });
     await view.setState({ mode: "all" });
     const projectRows = () => Array.from(content().querySelectorAll<HTMLElement>(".tm-project-row .tm-task-title")).map(title => title.textContent);
-    // All Tasks lists every active project, each with its progress instead of a checkbox.
+    // All Tasks lists every open project, each with its progress instead of a checkbox.
     expect(projectRows().sort()).toEqual(["Launch", "Site"]);
     expect(content().querySelector(".tm-project-row .tm-project-progress")).not.toBeNull();
     expect(content().querySelector(".tm-project-row input[type=checkbox]")).toBeNull();
@@ -841,6 +841,36 @@ describe("a project page's subprojects", () => {
     expect(Array.from(content().querySelectorAll(".tm-task-item .tm-task-title")).map(title => title.textContent)).toEqual(["Loose", "Code"]);
     await view.setState({ mode: "all", pagePath: "Site.md", layout: "kanban" } as never);
     expect(Array.from(content().querySelectorAll(".tm-kanban-column-header h2")).map(title => title.textContent)[0]).toBe("Projects");
+  });
+});
+
+describe("groups without tasks", () => {
+  it("shows every heading of a note, and every status and priority, in a list and on a board alike", async () => {
+    const { view, content } = await setup([["Site.md", "- [ ] Loose\n# Build\n- [ ] Code p1\n# Ship"]], { "Site.md": { tags: ["project"] } });
+    const titles = (selector: string) => Array.from(content().querySelectorAll(selector)).map(heading => heading.textContent);
+    await view.setState({ mode: "all", pagePath: "Site.md", layout: "kanban" } as never);
+    expect(titles(".tm-kanban-column-header h2")).toEqual(["No section", "Build", "Ship"]);
+    const internal = view as unknown as { grouping: string };
+    for (const [grouping, groups] of [["section", ["Build", "Ship"]], ["status", ["To do", "In progress", "Waiting", "Done", "Cancelled"]], ["priority", ["P1", "P2", "P3", "No priority"]]] as const) {
+      internal.grouping = grouping;
+      await view.setState({ mode: "all", pagePath: "Site.md", layout: "list" } as never);
+      expect(titles(".tm-section h2")).toEqual(groups);
+      await view.setState({ mode: "all", pagePath: "Site.md", layout: "kanban" } as never);
+      expect(titles(".tm-kanban-column-header h2")).toEqual(grouping === "section" ? ["No section", ...groups] : groups);
+    }
+  });
+});
+
+describe("the Projects view's subprojects", () => {
+  it("list under their parent, folding away from its chevron", async () => {
+    const { view, content } = await setup([note("Site.md", 1), note("Sub.md", 1), note("Leaf.md", 1)], {
+      "Site.md": { tags: ["project"] }, "Sub.md": { tags: ["project"], parent: "[[Site]]" }, "Leaf.md": { tags: ["project"], parent: "[[Sub]]" }
+    });
+    await view.setState({ mode: "projects" });
+    const rows = () => Array.from(content().querySelectorAll<HTMLElement>(".tm-project-row")).map(row => [row.querySelector(".tm-task-title")!.textContent, row.style.getPropertyValue("--tm-depth")]);
+    expect(rows()).toEqual([["Site", "0"], ["Sub", "1"], ["Leaf", "2"]]);
+    content().querySelector<HTMLButtonElement>(".tm-project-row .tm-row-fold")!.click();
+    expect(rows()).toEqual([["Site", "0"]]);
   });
 });
 
@@ -893,7 +923,7 @@ describe("View options › Projects in the calendar", () => {
     }) });
     Object.assign(view.app.vault, { getAbstractFileByPath: (path: string) => Object.assign(new TFile(), { path }) });
     const move = (view as unknown as { moveProject(project: Project, date: string): Promise<void> }).moveProject.bind(view);
-    const base = { path: "Launch.md", name: "Launch", openTasks: 1, completedTasks: 0, archived: false };
+    const base = { path: "Launch.md", name: "Launch", openTasks: 1, completedTasks: 0 };
     note = { tags: ["project"], date: "2026-10-05", endDate: "2026-10-09" };
     await move({ ...base, scheduledDate: "2026-10-05", endDate: "2026-10-09" }, "2026-10-07");
     expect(writes.pop()).toMatchObject({ date: "2026-10-07", endDate: "2026-10-11" });

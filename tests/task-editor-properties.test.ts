@@ -39,7 +39,7 @@ beforeAll(() => installObsidianDom());
 beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date(2026, 8, 28, 12)); });
 afterEach(() => { document.body.innerHTML = ""; vi.unstubAllGlobals(); vi.useRealTimers(); });
 
-const projects: Project[] = [{ path: "Work.md", name: "Work", openTasks: 0, completedTasks: 0, archived: false }];
+const projects: Project[] = [{ path: "Work.md", name: "Work", openTasks: 0, completedTasks: 0 }];
 
 function open(options: { task?: string; mode?: "inbox" | "today" | "tags"; preset?: object } = {}) {
   vi.stubGlobal("setTimeout", vi.fn());
