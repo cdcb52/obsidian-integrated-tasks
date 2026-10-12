@@ -5,21 +5,27 @@ export interface NoteHeading {
   level: number;
 }
 
-/** Markdown body lines, excluding YAML and fenced examples. */
-export function bodyLines(content: string | readonly string[]): Array<{ text: string; line: number }> {
+let codeBlocksHoldTasks = false;
+
+/** Settings › Ignore tasks in code blocks, off: the lines inside fenced code blocks are read for tasks too. */
+export function setCodeBlockTasks(read: boolean): void { codeBlocksHoldTasks = read; }
+export function codeBlockTasks(): boolean { return codeBlocksHoldTasks; }
+
+/** Markdown body lines, excluding YAML and fenced examples (unless code blocks hold tasks). */
+export function bodyLines(content: string | readonly string[], codeBlocks = codeBlocksHoldTasks): Array<{ text: string; line: number }> {
   const result: Array<{ text: string; line: number }> = [];
-  classifyLines(typeof content === "string" ? content.split(/\r?\n/) : content, (text, line, body) => { if (body) result.push({ text, line }); });
+  classifyLines(typeof content === "string" ? content.split(/\r?\n/) : content, (text, line, body) => { if (body) result.push({ text, line }); }, codeBlocks);
   return result;
 }
 
-/** Zero-based numbers of YAML and fenced lines, which hold no tasks. */
+/** Zero-based numbers of YAML and fenced lines, which hold no tasks (only the fences, when code blocks hold tasks). */
 export function nonBodyLines(lines: Iterable<string>): Set<number> {
   const result = new Set<number>();
-  classifyLines(lines, (_text, line, body) => { if (!body) result.add(line); });
+  classifyLines(lines, (_text, line, body) => { if (!body) result.add(line); }, codeBlocksHoldTasks);
   return result;
 }
 
-function classifyLines(lines: Iterable<string>, visit: (text: string, line: number, body: boolean) => void): void {
+function classifyLines(lines: Iterable<string>, visit: (text: string, line: number, body: boolean) => void, codeBlocks: boolean): void {
   let line = 0;
   let frontmatter = false;
   let fence: string | undefined;
@@ -34,8 +40,9 @@ function classifyLines(lines: Iterable<string>, visit: (text: string, line: numb
     // Fences may be indented to any depth inside list items.
     const marker = /^[ \t]*(`{3,}|~{3,})/.exec(text)?.[1];
     if (fence) {
-      if (marker?.[0] === fence[0] && marker.length >= fence.length && text.trim() === marker) fence = undefined;
-      visit(text, current, false);
+      const closing = marker?.[0] === fence[0] && marker.length >= fence.length && text.trim() === marker;
+      if (closing) fence = undefined;
+      visit(text, current, codeBlocks && !closing);
       continue;
     }
     // A backtick fence's info string holds no backtick: "```npm i``` first" is inline code.
@@ -50,7 +57,8 @@ function classifyLines(lines: Iterable<string>, visit: (text: string, line: numb
 
 export function scanHeadings(content: string | readonly string[]): NoteHeading[] {
   const headings: NoteHeading[] = [];
-  const lines = bodyLines(content);
+  // A "# comment" in a code block is never a heading, whatever code blocks hold.
+  const lines = bodyLines(content, false);
   for (let i = 0; i < lines.length; i++) {
     const { text, line } = lines[i];
     const atx = /^ {0,3}(#{1,6})(?:\s+|$)(.*)$/.exec(text);

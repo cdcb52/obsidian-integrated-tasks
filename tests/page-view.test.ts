@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, onTestFinished } from "vitest";
-import { MarkdownView, TFile, type App, type WorkspaceLeaf } from "obsidian";
+import { MarkdownView, TFile, TFolder, type App, type WorkspaceLeaf } from "obsidian";
 
 vi.mock("obsidian", async (importOriginal) => ({
   ...await importOriginal<typeof import("./obsidian-mock")>(),
@@ -722,6 +722,52 @@ it("creates a project note from a name alone, refusing an existing note", async 
   expect(refreshPath).toHaveBeenCalledWith("Garden.md");
   existing = {};
   await expect(plugin.createProjectNote({ name: "Garden" })).rejects.toThrow("already exists");
+});
+
+it("creates project notes in the new project location, making the folder when it is missing", async () => {
+  const plugin = new TaskManagerPlugin({} as App, {} as never);
+  const files = new Map<string, unknown>();
+  const create = vi.fn().mockResolvedValue(undefined);
+  const createFolder = vi.fn(async (path: string) => { files.set(path, new TFolder()); });
+  plugin.app = { vault: { getAbstractFileByPath: (path: string) => files.get(path) ?? null, create, createFolder } } as unknown as App;
+  (plugin as unknown as { index: unknown }).index = { refreshPath: vi.fn().mockResolvedValue(undefined) };
+  plugin.settings.projectFolder = "Work/Projects";
+  await expect(plugin.createProjectNote({ name: "Garden" })).resolves.toBe("Work/Projects/Garden.md");
+  expect(createFolder).toHaveBeenCalledExactlyOnceWith("Work/Projects");
+  expect(create).toHaveBeenCalledExactlyOnceWith("Work/Projects/Garden.md", expect.stringContaining('tags: ["project"]'));
+  await plugin.createProjectNote({ name: "Shed" });
+  expect(createFolder).toHaveBeenCalledOnce();
+  files.set("Work/Projects/Shed.md", {});
+  await expect(plugin.createProjectNote({ name: "Shed" })).rejects.toThrow("already exists");
+});
+
+it("moves a converted note to the new project location only when asked, and never over another note", async () => {
+  const plugin = new TaskManagerPlugin({} as App, {} as never);
+  const files = new Map<string, unknown>([["Projects", new TFolder()]]);
+  const note = Object.assign(new TFile(), { path: "Inbox/Garden.md", name: "Garden.md", basename: "Garden", parent: { path: "Inbox" } });
+  const renameFile = vi.fn(async (file: TFile, path: string) => { file.path = path; });
+  plugin.app = {
+    vault: { getAbstractFileByPath: (path: string) => files.get(path) ?? null, createFolder: vi.fn() },
+    fileManager: { processFrontMatter: vi.fn().mockResolvedValue(undefined), renameFile },
+    workspace: { getLeavesOfType: () => [] }
+  } as unknown as App;
+  (plugin as unknown as { index: unknown }).index = { refreshPath: vi.fn().mockResolvedValue(undefined) };
+  const convert = (file: TFile) => (plugin as unknown as { convertToProject(file: TFile): Promise<void> }).convertToProject(file);
+  plugin.settings.projectFolder = "Projects";
+  await convert(note);
+  expect(renameFile).not.toHaveBeenCalled();
+  plugin.settings.moveConvertedProjects = true;
+  files.set("Projects/Garden.md", {});
+  await convert(note);
+  expect(renameFile).not.toHaveBeenCalled();
+  files.delete("Projects/Garden.md");
+  await convert(note);
+  expect(renameFile).toHaveBeenCalledExactlyOnceWith(note, "Projects/Garden.md");
+  expect(note.path).toBe("Projects/Garden.md");
+  // Already there: it stays.
+  note.parent = { path: "Projects" } as never;
+  await convert(note);
+  expect(renameFile).toHaveBeenCalledOnce();
 });
 
 it("creates a new task in the open view's context: a task view, a project or tag note, else the Inbox", () => {

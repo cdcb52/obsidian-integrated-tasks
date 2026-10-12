@@ -21,6 +21,8 @@ export interface CachedNote {
   sectionHeadingLevel: number;
   /** Obsidian's tab size the note was read with: a tab's width decides how deep a line sits. */
   tabSize?: number;
+  /** Set when the note was read with tasks in code blocks counted. */
+  codeBlockTasks?: true;
   /** Set when a task used a relative date, which only holds on the day it was parsed. */
   day?: string;
   tasks: CachedTask[];
@@ -45,6 +47,8 @@ export interface NoteScan {
   sectionHeadingLevel: number;
   /** Obsidian's tab size the note was read with: a tab's width decides how deep a line sits. */
   tabSize?: number;
+  /** Set when the note was read with tasks in code blocks counted. */
+  codeBlockTasks?: true;
   /** Local ISO date the note was parsed on. */
   day: string;
 }

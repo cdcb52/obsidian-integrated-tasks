@@ -169,6 +169,10 @@ export interface TaskManagerSettings {
   /** Colour calendar task checkboxes by priority. */
   calendarPriorityColors: boolean;
   inboxPath: string;
+  /** The folder new projects are created in, without slashes at either end; empty for the vault root. */
+  projectFolder: string;
+  /** The Convert to project command also moves the note into the project folder. */
+  moveConvertedProjects: boolean;
   newTaskPosition: "top" | "bottom";
   showUndoNotices: boolean;
   density: "comfortable" | "compact";
@@ -195,6 +199,8 @@ export interface TaskManagerSettings {
   ignoredPaths: string[];
   /** Tags whose notes (frontmatter) and tasks are left out of every view. */
   ignoredTags: string[];
+  /** Leave out tasks inside fenced code blocks; when off, they are read like any other task. */
+  ignoreCodeBlockTasks: boolean;
   /** Set once the task sidebar and Task Details have opened on first run; closed later, they stay closed. */
   panelsPlaced: boolean;
   /**
@@ -215,6 +221,8 @@ export const DEFAULT_SETTINGS: TaskManagerSettings = {
   calendarProjectColors: true,
   calendarPriorityColors: true,
   inboxPath: "Inbox.md",
+  projectFolder: "",
+  moveConvertedProjects: false,
   newTaskPosition: "top",
   showUndoNotices: false,
   density: "compact",
@@ -228,6 +236,7 @@ export const DEFAULT_SETTINGS: TaskManagerSettings = {
   viewPeriods: {},
   ignoredPaths: [],
   ignoredTags: [],
+  ignoreCodeBlockTasks: true,
   panelsPlaced: false,
   sidebarIdleView: "upcoming"
 };

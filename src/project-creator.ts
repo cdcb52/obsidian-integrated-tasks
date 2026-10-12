@@ -184,6 +184,12 @@ export function projectDraftProperties(draft: ProjectDraft, dateFormat: string, 
   };
 }
 
+/** The new project location as typed, as a vault folder path: no slashes at either end, "" for the vault root. */
+export function projectFolderPath(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value.replace(/\\/g, "/").split("/").map(part => part.trim()).filter(part => part && part !== "." && part !== "..").join("/");
+}
+
 export function projectNotePath(name: string): string {
   const title = name.trim().replace(/\.md$/i, "");
   if (!title || title === "." || title === ".." || /[\\/:*?"<>|#^[\]\r\n]/.test(title)) {

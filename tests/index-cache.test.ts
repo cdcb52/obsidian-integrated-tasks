@@ -144,6 +144,18 @@ describe("persisted task index", () => {
     expect(readPaths(w)).toEqual(["A.md"]);
   });
 
+  it("parses a note again when tasks in code blocks start or stop counting", async () => {
+    const w = world({ "A.md": "- [ ] A" });
+    const cache = new MemoryIndexCache();
+    await shutdown(await boot(w, cache));
+    expect(cache.notes.get("A.md")!.codeBlockTasks).toBeUndefined();
+    cache.notes.get("A.md")!.codeBlockTasks = true;
+    w.vault.cachedRead.mockClear();
+    await shutdown(await boot(w, cache));
+    expect(readPaths(w)).toEqual(["A.md"]);
+    expect(cache.notes.get("A.md")!.codeBlockTasks).toBeUndefined();
+  });
+
   it("reuses relative dates only on the day they were parsed", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(2026, 8, 27, 10));

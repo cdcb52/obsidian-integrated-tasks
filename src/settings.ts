@@ -78,6 +78,24 @@ export class TaskManagerSettingTab extends PluginSettingTab {
       },
       {
         section: "General",
+        name: "New project location",
+        desc: "The folder where new projects are created, such as Projects. Leave empty for the vault root.",
+        render: (setting: Setting) => { setting.addText(text => text
+          .setPlaceholder("Vault root")
+          .setValue(this.plugin.settings.projectFolder)
+          .onChange(value => this.applySoon("projectFolder", () => this.plugin.setProjectFolder(value)))); }
+      },
+      {
+        section: "General",
+        name: "Move converted notes to the project location",
+        desc: "When the Convert to project command turns a note into a project, also move the note to the new project location.",
+        render: (setting: Setting) => { setting.addToggle(toggle => toggle.setValue(this.plugin.settings.moveConvertedProjects).onChange(async value => {
+          this.plugin.settings.moveConvertedProjects = value;
+          await this.plugin.saveSettings();
+        })); }
+      },
+      {
+        section: "General",
         name: "New task position",
         desc: "Insert added or moved tasks at the top or bottom of the first checklist in the destination file or heading. If there is no checklist, insert at the start of the scope.",
         render: (setting: Setting) => this.renderPositionSetting(setting)
@@ -174,6 +192,13 @@ export class TaskManagerSettingTab extends PluginSettingTab {
         name: "Ignored tags",
         desc: "Leave out notes with these tags in their properties, and tasks tagged with them. Ignoring a tag also ignores its nested tags. One per line, such as template or someday.",
         render: (setting: Setting) => this.renderIgnoreSetting(setting, "ignoredTags", "template\nsomeday")
+      },
+      {
+        section: "Ignored tasks",
+        name: "Ignore tasks in code blocks",
+        desc: "Leave out checklist items inside fenced code blocks (``` or ~~~), such as examples in notes. When off, they are tasks like any other.",
+        render: (setting: Setting) => { setting.addToggle(toggle => toggle.setValue(this.plugin.settings.ignoreCodeBlockTasks)
+          .onChange(value => this.plugin.setIgnoreCodeBlockTasks(value))); }
       },
       {
         section: "Appearance",

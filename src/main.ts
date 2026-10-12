@@ -9,9 +9,10 @@ import { scanTasks } from "./parser";
 import { applyProjectDraft, projectEditDraft } from "./project-editor";
 import { cloneTaskFilters } from "./task-filters";
 import { SmartListEditorModal, type SmartListDraft } from "./smart-list-editor";
-import { ProjectCreatorModal, projectNotePath, projectNoteContent, type ProjectDraft } from "./project-creator";
+import { ProjectCreatorModal, projectFolderPath, projectNotePath, projectNoteContent, type ProjectDraft } from "./project-creator";
 import { setTagFormat as useTagFormat, type TagFormat } from "./task-tags";
 import { convertTagFormat } from "./tag-links";
+import { setCodeBlockTasks } from "./structure";
 import { openConfirm } from "./confirm-modal";
 import { TaskModeController } from "./task-mode";
 import type { TaskEditorPreset } from "./types";
@@ -335,6 +336,10 @@ export default class TaskManagerPlugin extends Plugin {
     this.settings.calendarPriorityColors = this.settings.calendarPriorityColors !== false;
     if (typeof this.settings.inboxPath !== "string" || !this.settings.inboxPath.trim()) this.settings.inboxPath = DEFAULT_SETTINGS.inboxPath;
     if (!this.settings.inboxPath.endsWith(".md")) this.settings.inboxPath = `${this.settings.inboxPath}.md`;
+    this.settings.projectFolder = projectFolderPath(this.settings.projectFolder);
+    this.settings.moveConvertedProjects = this.settings.moveConvertedProjects === true;
+    this.settings.ignoreCodeBlockTasks = this.settings.ignoreCodeBlockTasks !== false;
+    setCodeBlockTasks(!this.settings.ignoreCodeBlockTasks);
     this.settings.showUndoNotices = this.settings.showUndoNotices === true;
     // Compact is the default; only an explicit Comfortable choice keeps Comfortable.
     this.settings.density = this.settings.density === "comfortable" ? "comfortable" : "compact";
@@ -516,9 +521,12 @@ export default class TaskManagerPlugin extends Plugin {
   /** Writes a new project note (a name alone is enough) and indexes it; returns its path. */
   async createProjectNote(draft: Partial<ProjectDraft> & { name: string }): Promise<string> {
     const full: ProjectDraft = { date: "", endDate: "", deadline: "", priority: "", parent: "", tags: "", archived: false, ...draft };
-    const path = projectNotePath(full.name);
+    const folder = this.settings.projectFolder;
+    const path = (folder ? `${folder}/` : "") + projectNotePath(full.name);
     if (this.app.vault.getAbstractFileByPath(path)) throw new Error("A note with this name already exists.");
-    await this.app.vault.create(path, projectNoteContent(full, this.dateFormat(), this.settings.linkDates));
+    const content = projectNoteContent(full, this.dateFormat(), this.settings.linkDates);
+    await this.ensureFolder(folder);
+    await this.app.vault.create(path, content);
     await this.index.refreshPath(path);
     return path;
   }
@@ -671,11 +679,50 @@ export default class TaskManagerPlugin extends Plugin {
   private async convertToProject(file: TFile): Promise<void> {
     try {
       await this.app.fileManager.processFrontMatter(file, addProjectProperties);
+      const moved = this.settings.moveConvertedProjects ? await this.moveToProjectFolder(file) : "stayed";
       await this.index.refreshPath(file.path);
-      new Notice(`Converted ${file.basename} to a project.`);
+      const where = this.settings.projectFolder || "the vault root";
+      new Notice(moved === "taken" ? `Converted ${file.basename} to a project. A note with this name is already in ${where}, so it stayed where it is.`
+        : moved === "moved" ? `Converted ${file.basename} to a project and moved it to ${where}.`
+        : `Converted ${file.basename} to a project.`);
     } catch (error) {
       new Notice(error instanceof Error ? error.message : "Could not convert the note to a project.");
     }
+  }
+
+  /** Moves a note into the new project location, unless it is there already or a note there has its name. */
+  private async moveToProjectFolder(file: TFile): Promise<"moved" | "stayed" | "taken"> {
+    const folder = this.settings.projectFolder;
+    if ((file.parent?.path ?? "/") === (folder || "/")) return "stayed";
+    const destination = (folder ? `${folder}/` : "") + file.name;
+    if (this.app.vault.getAbstractFileByPath(destination)) return "taken";
+    await this.ensureFolder(folder);
+    const oldPath = file.path;
+    await this.app.fileManager.renameFile(file, destination);
+    // Usually already done by the rename event; repeating it is a no-op.
+    await this.retargetViews(file, oldPath);
+    return "moved";
+  }
+
+  /** Creates a folder, and the folders above it, when missing; the vault root ("") always exists. */
+  private async ensureFolder(folder: string): Promise<void> {
+    if (!folder || this.app.vault.getAbstractFileByPath(folder) instanceof TFolder) return;
+    if (this.app.vault.getAbstractFileByPath(folder)) throw new Error(`${folder} is a file, not a folder.`);
+    await this.app.vault.createFolder(folder);
+  }
+
+  /** Projects are created in this folder from now on; empty for the vault root. */
+  async setProjectFolder(value: string): Promise<void> {
+    this.settings.projectFolder = projectFolderPath(value);
+    await this.saveSettings();
+  }
+
+  /** Tasks in code blocks are read, or left out, from now on: the vault is read again. */
+  async setIgnoreCodeBlockTasks(ignore: boolean): Promise<void> {
+    this.settings.ignoreCodeBlockTasks = ignore;
+    setCodeBlockTasks(!ignore);
+    await this.saveSettings();
+    await this.refreshDateParsing();
   }
 
   /**

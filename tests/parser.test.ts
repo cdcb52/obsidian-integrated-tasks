@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseDateExpression } from "../src/date";
 import { dailyNoteDateFormat } from "../src/daily-notes";
 import { parseTaskInput, parseTaskLine, rewriteTaskLine, scanTasks, serializeTask, serializeTaskInput } from "../src/parser";
+import { nonBodyLines, setCodeBlockTasks } from "../src/structure";
 
 const reference = new Date(2026, 8, 4, 10, 0, 0);
 
@@ -179,6 +180,28 @@ describe("task scanner", () => {
       "```"
     ].join("\n"), reference);
     expect(tasks.map((task) => task.title)).toEqual(["Real task"]);
+  });
+
+  it("reads tasks in fenced code when code blocks hold tasks, but never headings there", () => {
+    setCodeBlockTasks(true);
+    try {
+      const tasks = scanTasks("Work.md", [
+        "---",
+        "sample: '- [ ] not a task'",
+        "---",
+        "# Plan",
+        "```markdown",
+        "# Not a section",
+        "- [ ] Example",
+        "```",
+        "- [ ] Real task"
+      ].join("\n"), reference);
+      expect(tasks.map(task => [task.title, task.line, task.section])).toEqual([["Example", 6, "Plan"], ["Real task", 8, "Plan"]]);
+      expect([...nonBodyLines(["```", "- [ ] Example", "```"])]).toEqual([0, 2]);
+    } finally {
+      setCodeBlockTasks(false);
+    }
+    expect([...nonBodyLines(["```", "- [ ] Example", "```"])]).toEqual([0, 1, 2]);
   });
 
   it("reads a line that starts with inline code as prose, not a fence", () => {

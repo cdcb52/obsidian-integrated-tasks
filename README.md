@@ -298,12 +298,14 @@ Choose between two **Styles** in settings: **Griply** (the default, shown above)
 | Setting | What it does |
 | --- | --- |
 | **Inbox note** | Where new tasks go when you're not in a project or note |
+| **New project location**, **Move converted notes to the project location** | The folder new projects go in, and whether **Convert to project** moves the note there |
 | **New task position** | Add new and moved tasks at the top or bottom |
 | **Section heading level** | Which heading level divides a project into sections |
 | **Date format**, **Link dates** | How dates are written; **Update dates** rewrites existing ones |
 | **Tag format** | `#tag` or `#[[tag]]`; **Convert notes** rewrites existing tags |
 | **Record completion dates** | Add `✓date` when you complete a task |
 | **Ignored folders and notes**, **Ignored tags** | Leave out templates, archives or private notes |
+| **Ignore tasks in code blocks** | Leave out checklist items inside fenced code blocks (on by default) |
 | **Style**, **Task details**, **Density** | How lists look and where tasks open |
 | **Show files in sidebar** | Keep your vault's files and folders in the task sidebar |
 | **Show subtasks in task views** | In the Things style, list subtasks as their own rows |
