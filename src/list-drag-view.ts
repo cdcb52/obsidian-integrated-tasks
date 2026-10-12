@@ -3,13 +3,9 @@ import type { Task } from "./types";
 import { isStructuralGroup, type ListDropGroup, type ListPlacement } from "./list-drag";
 import { taskTitleLabel } from "./task-title";
 import { activeTaskDrag, dropTargetAt, highlightDropTarget, TASK_DRAG_TYPE, type DropPoint, type DropTarget, type TaskDrag } from "./sidebar-drop";
+import { DRAG_SLOP, FOLDED, LiftedRow, listenForEscape, LONG_PRESS_MS, PRESS_SLOP, Slides, UNFOLDED } from "./drag-motion";
 
-/**
- * A lifted row folds out of the list (its slot closing) while the gap shows where it will land: set on the row itself,
- * as the fold must win over every layout's row sizing, and taken off again as it returns.
- */
-const FOLDED: Partial<CSSStyleDeclaration> = { height: "0", minHeight: "0", paddingBlock: "0", marginBlock: "0", borderWidth: "0", overflow: "hidden", opacity: "0" };
-const UNFOLDED: Partial<CSSStyleDeclaration> = { height: "", minHeight: "", paddingBlock: "", marginBlock: "", borderWidth: "", overflow: "", opacity: "" };
+export { DRAG_MOTION_MS, LONG_PRESS_MS, PRESS_SLOP } from "./drag-motion";
 
 export interface DropIntent {
   group?: ListDropGroup;
@@ -20,9 +16,6 @@ export interface DropIntent {
   gap?: { element: HTMLElement; where: "before" | "after" | "start" | "end"; depth: number };
 }
 
-/** How long each drag motion takes: lifting, a gap moving, rows sliding, and settling on drop. */
-export const DRAG_MOTION_MS = 150;
-const DRAG_EASING = "cubic-bezier(0.2, 0, 0, 1)";
 /** Moving this far right of where the row was grabbed nests it; it un-nests back within NEST_RELEASE_PX. */
 const NEST_PX = 24;
 const NEST_RELEASE_PX = 16;
@@ -32,13 +25,6 @@ const SIDE_HYSTERESIS_PX = 4;
 const MOVERS = ".tm-task-item:not(.tm-drag-preview), .tm-drop-gap, .tm-section > h2, .tm-show-more-tasks";
 /** What the pointer can rest on mid-slide: a row, the gap or a group heading. */
 const HOLDERS = ".tm-task-item, .tm-drop-gap, .tm-section > h2";
-/** On touch screens a row lifts for dragging after a press held this long (and within PRESS_SLOP px of where it began). */
-export const LONG_PRESS_MS = 350;
-export const PRESS_SLOP = 8;
-
-function motion(doc: Document): number {
-  return doc.defaultView?.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? 0 : DRAG_MOTION_MS;
-}
 
 function depthOf(row: HTMLElement): number {
   return Number.parseInt(row.style.getPropertyValue("--tm-depth") || "0", 10) || 0;
@@ -79,8 +65,8 @@ export class ListDragController {
   /** The slot as chosen by position alone, before moving right nests it; un-nesting returns to it. */
   private flat?: DropIntent;
   private sources: HTMLElement[] = [];
-  /** Rows (and the gap) sliding into place, with how far each started from where it now sits. */
-  private slides = new WeakMap<HTMLElement, { animation: Animation; delta: number }>();
+  /** Rows (and the gap) sliding into place. */
+  private slides = new Slides(MOVERS, HOLDERS);
   /** Identifies drop targets so the gap only moves when the drop position changes. */
   private keys = new WeakMap<HTMLElement, number>();
   private lastKey = 0;
@@ -153,19 +139,11 @@ export class ListDragController {
   }
 
   /** How far `row` is still shifted from its place by a slide in progress: 0 once it has settled. */
-  private slideOffset(row: Element): number {
-    const slide = row.instanceOf(HTMLElement) ? this.slides.get(row) : undefined;
-    if (!slide || slide.animation.playState === "finished" || slide.animation.playState === "idle") return 0;
-    const progress = slide.animation.effect?.getComputedTiming().progress;
-    return progress === null || progress === undefined ? 0 : slide.delta * (1 - progress);
-  }
+  private slideOffset(row: Element): number { return this.slides.offset(row); }
 
   /** `element`'s box where it will rest once the row (or gap) holding it stops sliding. */
   private settledRect(element: Element): { left: number; right: number; top: number; bottom: number; height: number } {
-    const rect = element.getBoundingClientRect();
-    const holder = element.closest(HOLDERS);
-    const shift = holder ? this.slideOffset(holder) : 0;
-    return { left: rect.left, right: rect.right, top: rect.top - shift, bottom: rect.bottom - shift, height: rect.height };
+    return this.slides.settledRect(element);
   }
 
   /**
@@ -210,30 +188,8 @@ export class ListDragController {
     return nearest && y < bottom ? nearest.element : list;
   }
 
-  /**
-   * Moves something while every row it displaces slides from where it was to where it lands,
-   * so rows glide aside as the drop gap opens, closes or moves. A row whose resting place the change
-   * leaves alone keeps sliding as it was; one that moves glides on from where it is drawn.
-   */
-  private slide(scope: Element | Document, change: () => void): void {
-    const rows = Array.from(scope.querySelectorAll<HTMLElement>(MOVERS));
-    // Read every position first, then change and read again, then start animations: one layout each way.
-    const before = new Map(rows.map(row => { const top = row.getBoundingClientRect().top; return [row, { drawn: top, rest: top - this.slideOffset(row) }]; }));
-    change();
-    const duration = motion(scope.instanceOf(Document) ? scope : scope.ownerDocument);
-    const after = new Map(rows.filter(row => row.isConnected).map(row => [row, row.getBoundingClientRect().top - this.slideOffset(row)]));
-    for (const row of rows) {
-      const rest = after.get(row);
-      const was = before.get(row)!;
-      if (rest === undefined) { this.slides.get(row)?.animation.cancel(); continue; }
-      if (Math.abs(rest - was.rest) < 0.5) continue;
-      this.slides.get(row)?.animation.cancel();
-      this.slides.delete(row);
-      const delta = was.drawn - rest;
-      if (!duration || typeof row.animate !== "function" || Math.abs(delta) < 0.5) continue;
-      this.slides.set(row, { animation: row.animate([{ transform: `translateY(${delta}px)` }, { transform: "none" }], { duration, easing: DRAG_EASING }), delta });
-    }
-  }
+  /** Moves something while every row it displaces slides from where it was to where it lands (see Slides). */
+  private slide(scope: Element | Document, change: () => void): void { this.slides.slide(scope, change); }
 
   /**
    * Where the gap would sit, as one key however it is described: "after row 3" and "before row 4" are the
@@ -522,11 +478,7 @@ export class ListDragController {
     let pointer: number | undefined;
     let origin = { x: 0, y: 0 };
     let dragging = false;
-    let preview: HTMLElement | undefined;
-    let previewOffset = { x: 0, y: 0 };
-    /** Where the floating row was placed when lifted; it then follows the pointer by a transform, which needs no layout. */
-    let previewBase = { left: 0, top: 0 };
-    let previewShift = { x: 0, y: 0 };
+    let preview: LiftedRow | undefined;
     /** The latest pointer position, handled once per frame however many moves arrive. */
     let latest: { clientX: number; clientY: number } | undefined;
     let frameScheduled = false;
@@ -546,20 +498,7 @@ export class ListDragController {
       else highlightDropTarget(target?.element, false);
     };
     /** Glides the floating row onto `to` (the gap, or back to its slot); resolves when it arrives, at once without motion. */
-    const glide = async (to: DOMRect): Promise<void> => {
-      const current = preview;
-      if (!current) return;
-      const from = current.getBoundingClientRect();
-      // It settles back to the row's size and shadow as it lands.
-      current.addClass("is-settling");
-      const duration = motion(row.ownerDocument);
-      if (!duration || typeof current.animate !== "function") return;
-      current.querySelector(".tm-drag-count")?.remove();
-      const shifted = (x: number, y: number): string => `translate3d(${x}px, ${y}px, 0px)`;
-      const animation = current.animate([{ transform: shifted(previewShift.x, previewShift.y) },
-        { transform: shifted(previewShift.x + to.left - from.left, previewShift.y + to.top - from.top) }], { duration, easing: DRAG_EASING, fill: "forwards" });
-      await animation.finished.catch(() => {});
-    };
+    const glide = async (to: DOMRect): Promise<void> => { await preview?.glide(to); };
     // Touch: a long press lifts the row (armed), and moving the finger then drags it. Before that, a quick
     // horizontal move is a swipe (see TaskMainView.bindSwipe) and a vertical one scrolls the list.
     let press: { timer: number; id: number; x: number; y: number } | undefined;
@@ -620,7 +559,7 @@ export class ListDragController {
       const outside = Boolean(bounds && (point.clientX < bounds.left || point.clientX > bounds.right || point.clientY < bounds.top || point.clientY > bounds.bottom));
       const height = sourceRect?.height ?? 0;
       // Above or below is judged by the lifted row's middle, wherever on it the row was grabbed.
-      const found = hit({ clientX: point.clientX, clientY: point.clientY - previewOffset.y + height / 2 });
+      const found = hit({ clientX: point.clientX, clientY: point.clientY - current.offset.y + height / 2 });
       // The gap marks the drop. Hovering the gap keeps its slot, except that moving left over the grabbed
       // row's own slot (or where earlier left moves took it) outdents it.
       if (found && found.element !== this.gap) { this.sideways = false; this.flat = found.target; }
@@ -628,8 +567,7 @@ export class ListDragController {
       // Then, wherever the slot is, moving right of where the row was grabbed nests it under the row above.
       if (this.flat) this.placeGap(this.nested(this.flat, point.clientX), height, doc);
       // Writes last, so this frame lays out once.
-      previewShift = { x: point.clientX - previewOffset.x - previewBase.left, y: point.clientY - previewOffset.y - previewBase.top };
-      current.style.transform = `translate3d(${previewShift.x}px, ${previewShift.y}px, 0px)`;
+      current.follow(point.clientX, point.clientY);
       if (side?.element !== over?.element) {
         leave(over);
         over = side;
@@ -644,7 +582,7 @@ export class ListDragController {
         chip?.remove();
         chip = undefined;
       }
-      current.toggleClass("is-outside", outside);
+      current.element.toggleClass("is-outside", outside);
     };
     const win = (): Window => row.ownerDocument.defaultView ?? window;
     /** Handles the pending pointer position now (before a drop reads where it lands). */
@@ -661,7 +599,7 @@ export class ListDragController {
     row.addEventListener("pointermove", event => {
       if (press?.id === event.pointerId && Math.hypot(event.clientX - press.x, event.clientY - press.y) > PRESS_SLOP) cancelPress();
       if (pointer !== event.pointerId) return;
-      if (!dragging && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) < 5) return;
+      if (!dragging && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) < DRAG_SLOP) return;
       event.preventDefault();
       const doc = row.ownerDocument;
       if (!dragging) {
@@ -674,35 +612,12 @@ export class ListDragController {
         label = moving.length > 1 ? `${moving.length} tasks` : taskTitleLabel(task.title);
         const rect = row.getBoundingClientRect();
         sourceRect = rect;
-        previewOffset = { x: origin.x - rect.left, y: origin.y - rect.top };
         // Lift: a floating copy of the row, selected-looking, with a count when several tasks move together.
-        preview = row.cloneNode(true) as HTMLElement;
-        preview.removeAttribute("data-drop-position");
-        preview.removeClass("is-dragging");
-        preview.addClass("tm-drag-preview", "is-selected");
-        preview.setAttribute("aria-hidden", "true");
-        preview.inert = true;
-        preview.draggable = false;
-        preview.style.width = `${rect.width}px`;
-        preview.style.height = `${rect.height}px`;
-        if (moving.length > 1) {
-          const count = preview.createSpan({ cls: "tm-drag-count", text: String(moving.length) });
-          count.style.left = `${previewOffset.x + 8}px`;
-          count.style.top = `${previewOffset.y + 2}px`;
-        }
-        // Keep the layout's ancestor styles, including kanban card formatting.
-        row.parentElement?.appendChild(preview);
+        // It keeps the layout's ancestor styles, including kanban card formatting.
+        preview = new LiftedRow(row, origin, { into: row.parentElement ?? doc.body, classes: ["tm-drag-preview", "is-selected"], remove: ["is-dragging"], count: moving.length });
+        preview.element.removeAttribute("data-drop-position");
         doc.body.addClass("tm-list-dragging");
-        // Placed over the row once; Obsidian panes can establish a containing block for fixed children,
-        // so correct for its displacement. From here on the copy only moves by transform.
-        preview.style.left = `${rect.left}px`;
-        preview.style.top = `${rect.top}px`;
-        const placed = preview.getBoundingClientRect();
-        preview.style.left = `${2 * rect.left - placed.left}px`;
-        preview.style.top = `${2 * rect.top - placed.top}px`;
-        previewBase = { left: rect.left, top: rect.top };
-        previewShift = { x: 0, y: 0 };
-        listenForEscape();
+        escapeDrag();
         // The dragged rows' slots close, and the gap opens where the grabbed row was.
         const rows = moving.map(item => this.rows.get(item.id)).filter((item): item is HTMLElement => Boolean(item?.isConnected));
         if (!rows.includes(row)) rows.push(row);
@@ -768,19 +683,17 @@ export class ListDragController {
     };
     // Escape abandons the drag in flight; the key goes no further (it would clear the selection or close a card).
     let stopEscape: (() => void) | undefined;
-    const listenForEscape = (): void => {
-      const doc = row.ownerDocument;
-      const onKey = (event: KeyboardEvent): void => {
-        if (event.key !== "Escape" || !dragging || pointer === undefined) return;
-        event.preventDefault(); event.stopPropagation();
+    const escapeDrag = (): void => {
+      const stop = listenForEscape(row.ownerDocument, () => {
+        if (!dragging || pointer === undefined) return false;
         const id = pointer;
         pointer = undefined;
         suppressClickUntil = Date.now() + 250;
         try { row.releasePointerCapture(id); } catch { /* Already released. */ }
         flyBack();
-      };
-      doc.addEventListener("keydown", onKey, true);
-      stopEscape = () => { doc.removeEventListener("keydown", onKey, true); stopEscape = undefined; };
+        return true;
+      });
+      stopEscape = () => { stop(); stopEscape = undefined; };
     };
     row.addEventListener("pointerup", event => {
       cancelPress();
