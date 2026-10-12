@@ -28,10 +28,10 @@ it("parses the colour property, including aliases, into project properties", () 
 const project: Project = { name: "Launch", path: "Launch.md", openTasks: 0, completedTasks: 0 };
 const blank: ProjectDraft = { name: "Launch", date: "", endDate: "", deadline: "", priority: "", parent: "", tags: "project" };
 
-it("writes the canonical colour to new notes and omits it for none", () => {
+it("writes the canonical colour to new notes, and an empty one for none", () => {
   expect(projectNoteContent({ ...blank, color: "Blue" }, "YYYY-MM-DD", false)).toContain('\ncolor: "blue"\n');
   expect(projectNoteContent({ ...blank, color: "#A1B2C3" }, "YYYY-MM-DD", false)).toContain('\ncolor: "#a1b2c3"\n');
-  for (const color of ["", undefined]) expect(projectNoteContent({ ...blank, color }, "YYYY-MM-DD", false)).not.toContain("color");
+  for (const color of ["", undefined]) expect(projectNoteContent({ ...blank, color }, "YYYY-MM-DD", false)).toContain("\ncolor: null\n");
   expect(() => projectNoteContent({ ...blank, color: "red;x" }, "YYYY-MM-DD", false)).toThrow("hex");
 });
 

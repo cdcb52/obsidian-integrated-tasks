@@ -17,6 +17,8 @@ export interface ProjectDraft {
   color?: string;
   /** A task status ("doing"…); "" removes the property and undefined leaves it unchanged. */
   status?: string;
+  /** The project's description; undefined (or, for a new project, empty) leaves it out. */
+  description?: string;
 }
 interface ProjectCreatorOptions {
   projects: Project[];
@@ -38,10 +40,11 @@ export class ProjectCreatorModal extends Modal {
     const content = this.contentEl;
     content.empty();
     content.createEl("h2", { text: "Create project" });
-    const field = (label: string, kind: "input" | "select" = "input", placeholder?: string): HTMLInputElement | HTMLSelectElement => {
+    const field = (label: string, kind: "input" | "select" | "textarea" = "input", placeholder?: string): HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement => {
       const row = content.createDiv({ cls: "tm-editor-field" });
       const caption = row.createEl("label", { text: label });
-      const input = kind === "select" ? row.createEl("select") : row.createEl("input", { type: "text", attr: { placeholder: placeholder ?? "" } });
+      const input = kind === "select" ? row.createEl("select") : kind === "textarea" ? row.createEl("textarea", { attr: { placeholder: placeholder ?? "", rows: "3" } })
+        : row.createEl("input", { type: "text", attr: { placeholder: placeholder ?? "" } });
       input.setAttribute("aria-label", label);
       caption.addEventListener("click", () => input.focus());
       return input;
@@ -65,6 +68,7 @@ export class ProjectCreatorModal extends Modal {
     let color: string | undefined;
     const colorPicker = renderProjectColorPicker(colorRow, "", value => { color = value; });
     colorLabel.addEventListener("click", () => colorPicker.focus());
+    const description = field("Description", "textarea", "What the project is for");
     const error = content.createDiv({ cls: "tm-editor-error", attr: { role: "alert" } });
     this.actions = this.modalEl.createDiv({ cls: "tm-editor-actions" });
     const cancel = this.actions.createEl("button", { text: "Cancel" });
@@ -72,7 +76,7 @@ export class ProjectCreatorModal extends Modal {
     const submit = async (): Promise<void> => {
       if (create.disabled) return;
       const draft = { name: name.value, date: date.value, endDate: endDate.value, deadline: deadline.value,
-        priority: priority.value, parent: parent.value, tags: tags.value, status: status.value, color };
+        priority: priority.value, parent: parent.value, tags: tags.value, status: status.value, color, description: description.value };
       create.disabled = cancel.disabled = true;
       try {
         projectNoteContent(draft, this.options.dateFormat, this.options.linkDates);
@@ -155,10 +159,16 @@ export function renderProjectColorPicker(parent: HTMLElement, initial: string | 
   return { focus: () => (swatches.find(entry => entry.swatch.getAttribute("tabindex") === "0") ?? swatches[0]).swatch.focus() };
 }
 
-/** Validate everything before creating a file; JSON values are valid YAML scalars/lists. */
+/** Every project property, in the order a new project note (or Convert to project) lists them. */
+export const PROJECT_PROPERTY_NAMES = ["tags", "date", "end date", "deadline", "priority", "status", "parent", "color", "description"] as const;
+
+/**
+ * Validate everything before creating a file; JSON values are valid YAML scalars/lists. A new project has every
+ * property, as Convert to project gives a note: the ones left empty, empty.
+ */
 export function projectNoteContent(draft: ProjectDraft, dateFormat: string, linkDates: boolean, reference = new Date()): string {
   if (draft.parent === projectNotePath(draft.name)) throw new Error("A project cannot be its own parent.");
-  const frontmatter = projectDraftProperties(draft, dateFormat, linkDates, reference);
+  const frontmatter = { ...Object.fromEntries(PROJECT_PROPERTY_NAMES.map(name => [name, null])), ...projectDraftProperties(draft, dateFormat, linkDates, reference) };
   return `---\n${Object.entries(frontmatter).map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join("\n")}\n---\n`;
 }
 
@@ -177,14 +187,16 @@ export function projectDraftProperties(draft: ProjectDraft, dateFormat: string, 
   if (draft.color && !color) throw new Error("Enter a color as a hex value such as #3366ff.");
   const status = draft.status ? (TASK_STATUSES as readonly string[]).includes(draft.status) ? STATUS_LABELS[draft.status as TaskStatus] : undefined : undefined;
   if (draft.status && !status) throw new Error("Select a valid status.");
+  const description = draft.description?.trim();
   const tags = [...new Set(["project", ...draft.tags.split(/[,\s]+/).map(tag => tag.replace(/^#/, "")).filter(Boolean)])];
   return {
     tags, date: date(draft.date, "start date"), "end date": date(draft.endDate, "end date"),
     deadline: date(draft.deadline, "deadline"), priority: draft.priority ? Number(draft.priority) : null,
     parent: draft.parent ? `[[${draft.parent.replace(/\.md$/i, "")}]]` : null,
-    // No placeholder when unset: an empty colour or status means none.
+    // No placeholder when unset: an empty colour, status or description means none.
     ...(color ? { color } : {}),
-    ...(status ? { status } : {})
+    ...(status ? { status } : {}),
+    ...(description ? { description } : {})
   };
 }
 

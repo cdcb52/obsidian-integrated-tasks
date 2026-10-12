@@ -21,7 +21,7 @@ import { noteTokenEditor } from "./note-token-editor";
 import { noteTaskEditEditor, registerNoteTaskEdit } from "./note-task-edit";
 import { renderNoteTokens } from "./note-token-reading";
 import { EditorView } from "@codemirror/view";
-import { MarkdownView, Notice, Platform, Plugin, TFile, TFolder, WorkspaceLeaf, type Editor, type TAbstractFile, type ViewState } from "obsidian";
+import { MarkdownView, Notice, Platform, Plugin, TFile, TFolder, WorkspaceLeaf, type Editor, type PaneType, type TAbstractFile, type ViewState } from "obsidian";
 import { TaskEditorModal, initialDraft, type TaskEditorOptions, type TaskEditorProperty } from "./task-editor";
 import { TaskIndex, type RefreshOptions } from "./task-index";
 import { IndexedDbCache } from "./index-cache";
@@ -581,12 +581,13 @@ export default class TaskManagerPlugin extends Plugin {
 
   /**
    * Opens a project's note as its task view, turning task mode on; `keepTaskMode` (the task sidebar's lists) leaves
-   * task mode as it is, so with it off the note opens as a note.
+   * task mode as it is, so with it off the note opens as a note. `newLeaf`: where, as for `getLeaf` (a new tab unless
+   * said); false opens it in the tab in front, as the file explorer opens a file.
    */
-  async openProject(path: string, { keepTaskMode = false } = {}): Promise<void> {
+  async openProject(path: string, { keepTaskMode = false, newLeaf = "tab" }: { keepTaskMode?: boolean; newLeaf?: PaneType | boolean } = {}): Promise<void> {
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!(file instanceof TFile)) throw new Error("Project note no longer exists.");
-    const leaf = this.app.workspace.getLeaf("tab");
+    const leaf = this.leafFor(newLeaf);
     await leaf.openFile(file);
     if (!this.settings.taskMode && !keepTaskMode) await this.setTaskMode(true);
     else await this.taskModeController?.sync();
@@ -596,11 +597,11 @@ export default class TaskManagerPlugin extends Plugin {
     }
   }
 
-  /** Opens a tag's view, or its note as one (turning task mode on unless `keepTaskMode`, as for a project). */
-  async openTag(tag: string, { keepTaskMode = false } = {}): Promise<void> {
+  /** Opens a tag's view, or its note as one (turning task mode on unless `keepTaskMode`, and where `newLeaf` says, as for a project). */
+  async openTag(tag: string, { keepTaskMode = false, newLeaf = "tab" }: { keepTaskMode?: boolean; newLeaf?: PaneType | boolean } = {}): Promise<void> {
     const file = this.index.tagFile(tag);
     if (!file) return this.openTaskView({ mode: "tags", tag });
-    const leaf = this.app.workspace.getLeaf("tab");
+    const leaf = this.leafFor(newLeaf);
     await leaf.openFile(file);
     if (!this.settings.taskMode && !keepTaskMode) await this.setTaskMode(true);
     else await this.taskModeController?.sync();
@@ -608,6 +609,16 @@ export default class TaskManagerPlugin extends Plugin {
     for (const navLeaf of this.app.workspace.getLeavesOfType(TASK_NAV_VIEW)) {
       if (navLeaf.view instanceof TaskNavigationView) navLeaf.view.setActive("tags", tag);
     }
+  }
+
+  /**
+   * A new tab, split or window, as `getLeaf` gives; or for false the tab in front (unless pinned), whatever it shows: a
+   * task list is no note, so Obsidian's own choice would open a new tab beside it.
+   */
+  private leafFor(newLeaf: PaneType | boolean): WorkspaceLeaf {
+    if (newLeaf) return this.app.workspace.getLeaf(newLeaf);
+    const front = this.app.workspace.getMostRecentLeaf?.(this.app.workspace.rootSplit);
+    return front && !front.getViewState().pinned ? front : this.app.workspace.getLeaf(false);
   }
 
   private pendingRecurringNotes = new Set<string>();

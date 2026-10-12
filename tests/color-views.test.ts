@@ -95,7 +95,7 @@ it("saves the chosen colour for a new project, and refuses an unreadable hex", a
   created.content.querySelector<HTMLInputElement>('input[aria-label="Project name"]')!.value = "Launch";
   radios(created.content)[6].click();
   created.save.click();
-  await vi.waitFor(() => expect(created.createProject).toHaveBeenCalledWith({ ...blank, status: "", color: "blue" }));
+  await vi.waitFor(() => expect(created.createProject).toHaveBeenCalledWith({ ...blank, status: "", color: "blue", description: "" }));
 
   const invalid = openModal();
   invalid.content.querySelector<HTMLInputElement>('input[aria-label="Project name"]')!.value = "Launch";

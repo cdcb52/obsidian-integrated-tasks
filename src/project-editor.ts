@@ -5,7 +5,7 @@ import type { Project } from "./types";
 const propertyAliases: Record<string, string[]> = {
   date: ["date", "startdate", "scheduleddate"],
   "end date": ["enddate"], deadline: ["deadline"], priority: ["priority"], parent: ["parent"], tags: ["tags"],
-  color: ["color", "colour"], status: ["status"]
+  color: ["color", "colour"], status: ["status"], description: ["description"]
 };
 const normalize = (key: string): string => key.toLowerCase().replace(/[\s_-]/g, "");
 

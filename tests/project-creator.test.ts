@@ -15,8 +15,14 @@ it.each([true, false])("saves all project properties with linked dates: %s", lin
   expect(parseProjectProperties(result, "DD.MM.YYYY")).toEqual({ scheduledDate: "2026-09-17", endDate: "2026-09-20", deadline: "2026-09-21", priority: 2 });
   expect(parseProjectParent(result)).toBe("Projects/Studio");
 });
-it("retains editable empty properties and the required project tag", () => {
-  expect(properties(projectNoteContent({ ...blank, tags: "" }, "YYYY-MM-DD", false))).toEqual({ tags: ["project"], date: null, "end date": null, deadline: null, priority: null, parent: null });
+it("writes every project property, the empty ones empty, and the required project tag", () => {
+  const content = projectNoteContent({ ...blank, tags: "" }, "YYYY-MM-DD", false);
+  expect(properties(content)).toEqual({ tags: ["project"], date: null, "end date": null, deadline: null, priority: null, status: null, parent: null, color: null, description: null });
+  expect(Object.keys(properties(content))).toEqual(["tags", "date", "end date", "deadline", "priority", "status", "parent", "color", "description"]);
+  // As a filled-in project has them, in the same order.
+  const filled = properties(projectNoteContent({ ...blank, priority: "2", status: "doing", color: "blue", description: "  Two lines\nof text  " }, "YYYY-MM-DD", false));
+  expect(filled).toMatchObject({ priority: 2, status: "In progress", color: "blue", description: "Two lines\nof text" });
+  expect(Object.keys(filled)).toEqual(["tags", "date", "end date", "deadline", "priority", "status", "parent", "color", "description"]);
 });
 it.each([{ date: "not a date" }, { endDate: "garbage" }, { deadline: "garbage" }, { priority: "4" }, { parent: "Launch.md" }, { name: "../Launch" }])("rejects invalid draft %j before writing", patch => {
   expect(() => projectNoteContent({ ...blank, ...patch }, "YYYY-MM-DD", false)).toThrow();
@@ -50,7 +56,7 @@ it("shows all fields, retains invalid input, and submits the complete draft", as
   modal.onOpen();
   const fields = view.contentEl.all().filter(el => el.attrs["aria-label"]);
   expect(fields.map(el => el.attrs["aria-label"])).toEqual(["Project name", "Start date", "End date", "Deadline", "Priority", "Parent project", "Tags", "Status",
-    "Project color", "None", "Red", "Orange", "Yellow", "Green", "Cyan", "Blue", "Purple", "Pink", "Gray", "Custom color"]);
+    "Project color", "None", "Red", "Orange", "Yellow", "Green", "Cyan", "Blue", "Purple", "Pink", "Gray", "Custom color", "Description"]);
   fields[0].value = "Launch"; fields[1].value = "garbage";
   const button = view.modalEl.all().find(el => el.text === "Create project")!;
   button.dispatchEvent(new Event("click"));
@@ -60,6 +66,6 @@ it("shows all fields, retains invalid input, and submits the complete draft", as
   fields[1].value = "2026-09-17"; fields[4].value = "1";
   button.dispatchEvent(new Event("click"));
   await vi.waitFor(() => expect(view.close).toHaveBeenCalledOnce());
-  expect(createProject).toHaveBeenCalledExactlyOnceWith({ ...blank, date: "2026-09-17", priority: "1", status: "" });
+  expect(createProject).toHaveBeenCalledExactlyOnceWith({ ...blank, date: "2026-09-17", priority: "1", status: "", description: "" });
 });
 

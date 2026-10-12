@@ -412,6 +412,27 @@ it.each([false, true])("leaves task mode as it is when the task sidebar opens a 
   expect(sync).toHaveBeenCalledTimes(2);
 });
 
+it("opens a project from the task sidebar in the tab in front unless it is pinned, or where a modifier key says", async () => {
+  const plugin = new TaskManagerPlugin({} as App, {} as never);
+  const file = Object.assign(new TFile(), { path: "Project.md" });
+  let pinned = false;
+  // The tab in front shows a task list, which Obsidian would not open a note in.
+  const front = { openFile: vi.fn().mockResolvedValue(undefined), getViewState: () => ({ type: "task-manager-main", pinned }) };
+  const fresh = { openFile: vi.fn().mockResolvedValue(undefined) };
+  const getLeaf = vi.fn(() => fresh);
+  plugin.app = { vault: { getAbstractFileByPath: () => file }, workspace: { getLeavesOfType: () => [], getLeaf, getMostRecentLeaf: () => front, rootSplit: {}, revealLeaf: vi.fn() } } as unknown as App;
+  (plugin as unknown as { taskModeController: unknown }).taskModeController = { sync: vi.fn() };
+  await plugin.openProject(file.path, { keepTaskMode: true, newLeaf: false });
+  expect(front.openFile).toHaveBeenCalledExactlyOnceWith(file);
+  expect(getLeaf).not.toHaveBeenCalled();
+  pinned = true;
+  await plugin.openProject(file.path, { keepTaskMode: true, newLeaf: false });
+  expect(getLeaf).toHaveBeenLastCalledWith(false);
+  await plugin.openProject(file.path, { keepTaskMode: true, newLeaf: "tab" });
+  expect(getLeaf).toHaveBeenLastCalledWith("tab");
+  expect(front.openFile).toHaveBeenCalledOnce();
+});
+
 it("routes legacy project navigation through file opening", async () => {
   const plugin = new TaskManagerPlugin({} as App, {} as never);
   const open = vi.spyOn(plugin, "openProject").mockResolvedValue(undefined);

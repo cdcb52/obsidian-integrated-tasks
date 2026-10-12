@@ -9,6 +9,8 @@ export interface ViewOptionsState {
   sort: TaskSort; descending: boolean; grouping: TaskGrouping; filters: TaskFilter[];
   /** Without a status filter the view leaves completed (done and cancelled) tasks out, showing only open statuses. */
   openOnly?: boolean;
+  /** Without a status filter the view shows every status, done and cancelled too (grouped by status, or the Projects view). */
+  allStatuses?: boolean;
   /** What View default groups by in this view, such as "Note" or "Action date". */
   defaultGroup?: string;
   /** Whether the view lists the projects it matches among its tasks; undefined where it cannot (the calendar). */
@@ -285,8 +287,9 @@ export class ViewOptionsPanel {
     this.summary("group", state.grouping === "default" ? state.defaultGroup ?? "View default" : GROUPS.find(([value]) => value === state.grouping)?.[1] ?? "View default", false);
     for (const property of TASK_PROPERTIES) {
       const filter = filters.find(item => item.property === property.key);
-      // Without a status filter, a view hiding completed tasks shows the open statuses, not any.
-      const summary = !filter && property.key === "status" && state.openOnly ? OPEN_STATUSES.map(status => STATUS_LABELS[status]).join(", ") : filterSummary(property, filter);
+      // Without a status filter, a view hiding completed tasks shows the open statuses, not any; one showing them all, all.
+      const summary = filter || property.key !== "status" ? filterSummary(property, filter)
+        : state.openOnly ? OPEN_STATUSES.map(status => STATUS_LABELS[status]).join(", ") : state.allStatuses ? "All statuses" : filterSummary(property, filter);
       this.summary(property.key, summary, !filter);
     }
     this.dropdown?.render();
@@ -363,9 +366,13 @@ export class ViewOptionsPanel {
         return undefined;
       }
       if (CHOICE_PROPERTIES.has(property.key)) {
-        // A view that hides completed tasks already shows only the open statuses: they start checked, and its
-        // first option is the view's default rather than any status.
-        const implicit = (): string[] => property.key === "status" && this.host.state().openOnly ? OPEN_STATUSES.map(status => STATUS_LABELS[status]) : [];
+        // A view that hides completed tasks already shows only the open statuses, and one grouped by status every
+        // status: they start checked, and its first option is the view's default rather than any status.
+        const implicit = (): string[] => {
+          if (property.key !== "status") return [];
+          const state = this.host.state();
+          return (state.openOnly ? OPEN_STATUSES : state.allStatuses ? TASK_STATUSES : []).map(status => STATUS_LABELS[status]);
+        };
         const selection = (): Set<string> => new Set(current()?.values ?? implicit());
         return {
           label, multi: true,

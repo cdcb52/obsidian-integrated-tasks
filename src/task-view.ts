@@ -132,6 +132,8 @@ export class TaskMainView extends ItemView {
   private showProjects = true;
   /** The projects the list now shows, by their stand-in task's id. */
   private shownProjects = new Map<string, Project>();
+  /** The stand-in tasks of the projects shown, by id, for dragging them. */
+  private projectTasks = new Map<string, Task>();
   private propertyFilters: TaskFilter[] = [];
   private sort: TaskSort = "date";
   private descending = false;
@@ -191,6 +193,12 @@ export class TaskMainView extends ItemView {
 
   /** The Projects view itself (not a project's page), which lists projects in place of tasks. */
   private get isProjectsView(): boolean { return this.state.mode === "projects" && !this.pagePath; }
+
+  /**
+   * Whether the view lists done and cancelled tasks without a status filter: the Projects view does, and a list or
+   * board grouped by status, which has a group for each.
+   */
+  private get showsCompleted(): boolean { return this.showCompleted || this.isProjectsView || (this.grouping === "status" && this.layout !== "calendar"); }
 
   /** The Projects view in its Gantt layout. */
   private get isGantt(): boolean { return this.isProjectsView && this.projectLayout === "gantt"; }
@@ -592,7 +600,7 @@ export class TaskMainView extends ItemView {
     const tags = mode === "tags";
     return {
       mode: path ? "project" : this.layout === "calendar" && (mode === "today" || mode === "upcoming") ? "all" : mode,
-      showCompleted: this.showCompleted,
+      showCompleted: this.showsCompleted,
       projectPath: path,
       tag: scope?.mode === "tag" ? scope.tag : tags && !this.pagePath ? this.state.tag : undefined,
       tagPath: scope?.mode === "tag" ? scope.path : tags ? this.pagePath : undefined,
@@ -605,8 +613,9 @@ export class TaskMainView extends ItemView {
     this.resetRows();
     this.updateSelection();
     this.listDrag?.dispose();
-    this.listDrag = new ListDragController(id => this.plugin.index.taskById(id), (id, group, anchor, placement) => this.dropListTask(id, group, anchor, placement), this.layout !== "kanban",
-      // A project moves between the board's columns only, not to other panes' lists.
+    // Projects (the Projects view's) are no tasks of the index: their stand-ins come from the list.
+    this.listDrag = new ListDragController(id => this.plugin.index.taskById(id) ?? this.projectTasks.get(id), (id, group, anchor, placement) => this.dropListTask(id, group, anchor, placement), this.layout !== "kanban",
+      // A project moves within the Projects view only, not to other panes' lists.
       task => { if (!this.shownProjects.has(task.id)) return this.prepareDrag(task); this.draggedTasks = [task]; return [task]; });
     this.listDrag.onIdle = () => {
       if (!this.renderAfterDrag) return;
@@ -655,6 +664,7 @@ export class TaskMainView extends ItemView {
    */
   private projectItems(query: TaskQuery): Task[] {
     this.shownProjects.clear();
+    this.projectTasks.clear();
     const all = this.isProjectsView;
     if (!this.showProjects && !all) return [];
     const calendar = this.layout === "calendar" && !all;
@@ -676,6 +686,7 @@ export class TaskMainView extends ItemView {
       if (scope.tagPath && !this.plugin.index.taskHasTagPath(item, scope.tagPath)) continue;
       if (!taskMatchesQuery(item, scope, this.plugin.settings.inboxPath)) continue;
       this.shownProjects.set(item.id, project);
+      this.projectTasks.set(item.id, item);
       items.push(item);
     }
     const byId = new Map(items.map(item => [item.id, item]));
@@ -1358,7 +1369,7 @@ export class TaskMainView extends ItemView {
       state: () => ({
         sort: this.sort, descending: this.descending, grouping: this.grouping, filters: this.propertyFilters,
         // Completed tasks are left out unless shown or a status filter asks, on boards too; the Projects view lists every project.
-        openOnly: !this.showCompleted && !this.isProjectsView, defaultGroup: this.defaultGroupLabel(),
+        openOnly: !this.showsCompleted, allStatuses: this.showsCompleted, defaultGroup: this.defaultGroupLabel(),
         // The calendar has no room for projects; the Projects view lists nothing else.
         showProjects: this.isProjectsView ? undefined : this.showProjects
       }),
@@ -1503,26 +1514,63 @@ export class TaskMainView extends ItemView {
     await this.plugin.index.refreshPath(project.path);
   }
 
-  /** A project dropped in a board's column takes the column's status, priority or date. */
-  private async dropProject(project: Project, group?: ListDropGroup): Promise<void> {
-    if (!group?.property) return;
-    const value = group.value;
-    if (group.property === "status") {
+  /**
+   * A project dropped in a group or a board's column takes its status, priority or date. In a list it also takes the
+   * place it is dropped in: moved right under a project, that one as its parent; among a parent's subprojects, that
+   * parent; and within its own group, out from under its parent, its parent's parent (or none).
+   */
+  private async dropProject(project: Project, group?: ListDropGroup, anchor?: Task, placement?: ListPlacement): Promise<void> {
+    const item = this.projectTasks.get(`project:${project.path}`);
+    const property = group?.property;
+    const value = group?.value;
+    // A group of the value the project has already (dropped where it was, or beside a project there) is no change.
+    const moved = property !== undefined && item !== undefined && value !== taskGroupTarget(property, item).value;
+    const change: Partial<ProjectDraft> = {};
+    const near = anchor && anchor.id !== item?.id ? this.shownProjects.get(anchor.id) : undefined;
+    if (near) {
+      const itemOf = (path?: string): Task | undefined => path ? this.projectTasks.get(`project:${path}`) : undefined;
+      // Shown under its parent: the parent is in the same group.
+      const nested = (shown: Project): boolean => {
+        const [parent, self] = [itemOf(shown.parentPath), itemOf(shown.path)];
+        return Boolean(parent && self) && (!property || taskGroupTarget(property, parent!).value === taskGroupTarget(property, self!).value);
+      };
+      let parent: string | undefined;
+      if (placement === "child") parent = near.path;
+      else if (nested(near)) parent = near.parentPath;
+      else if (!moved && this.isWithinProject(project.path, near.path)) parent = near.parentPath ?? "";
+      else if (!moved && nested(project)) parent = "";
+      if (parent !== undefined && parent !== (project.parentPath ?? "")) {
+        if (parent && this.isWithinProject(parent, project.path)) { new Notice("A project can't go inside its own subproject."); return; }
+        change.parent = parent;
+      }
+    }
+    let date: string | undefined;
+    if (moved && property === "status") {
       const status = typeof value === "string" ? statusFromLabel(value) : undefined;
-      if (!status || status === project.status) return;
-      await this.plugin.updateProject(project.path, draft => ({ ...draft, status }));
-    } else if (group.property === "priority") {
-      const priority = typeof value === "number" ? String(value) : "";
-      if (priority === (project.priority ? String(project.priority) : "")) return;
-      await this.plugin.updateProject(project.path, draft => ({ ...draft, priority }));
-    } else if (group.property === "date" || group.property === "scheduledDate" || group.property === "deadline") {
-      // A column without a date takes none away: a project's dates are set in its own popovers.
-      if (typeof value !== "string") return;
-      if (group.property === "date") { await this.moveProject(project, value); return; }
-      const field = group.property === "deadline" ? "deadline" : "date";
-      if ((field === "date" ? project.scheduledDate : project.deadline) === value) return;
-      await this.plugin.updateProject(project.path, draft => ({ ...draft, [field]: value }));
-    } else new Notice("Projects move between columns of a status, a priority or a date.");
+      if (status) change.status = status;
+    } else if (moved && property === "priority") {
+      change.priority = typeof value === "number" ? String(value) : "";
+    } else if (moved && (property === "date" || property === "scheduledDate" || property === "deadline")) {
+      // A group without a date takes none away: a project's dates are set in its own popovers.
+      if (typeof value === "string") {
+        if (property === "date") date = value;
+        else change[property === "deadline" ? "deadline" : "date"] = value;
+      }
+    } else if (moved && !near) {
+      new Notice("Projects move between groups of a status, a priority or a date.");
+      return;
+    }
+    if (Object.keys(change).length) await this.plugin.updateProject(project.path, draft => ({ ...draft, ...change }));
+    if (date) await this.moveProject(project, date);
+  }
+
+  /** Whether `path` is the project at `ancestor` or one of its subprojects, however deep. */
+  private isWithinProject(path: string, ancestor: string): boolean {
+    const parents = new Map(this.plugin.index.projects().map(project => [project.path, project.parentPath]));
+    for (let current: string | undefined = path, steps = 0; current && steps <= parents.size; current = parents.get(current), steps++) {
+      if (current === ancestor) return true;
+    }
+    return false;
   }
 
   /**
@@ -1704,7 +1752,7 @@ export class TaskMainView extends ItemView {
   private async dropListTask(original: Task, group?: ListDropGroup, originalAnchor?: Task, placement?: ListPlacement): Promise<void> {
     try {
       const project = this.shownProjects.get(original.id);
-      if (project) { await this.dropProject(project, group); return; }
+      if (project) { await this.dropProject(project, group, originalAnchor, placement); return; }
       const selected = this.draggedTasks.length ? this.draggedTasks : [original];
       for (const task of selected) {
         const current = this.plugin.index.taskById(task.id);
@@ -2245,9 +2293,10 @@ export class TaskMainView extends ItemView {
     const project = this.shownProjects.get(task.id);
     if (project) {
       const row = this.renderProjectRow(list, project, depth, this.layout === "kanban");
-      // On the Projects board, a project moves between columns: its status, priority or dates.
+      // In the Projects view a project moves between groups and columns (its status, priority or dates), and in a list
+      // under another project (its parent).
       const primary = row.querySelector<HTMLElement>(".tm-task-primary");
-      if (this.isProjectsView && this.layout === "kanban" && primary) this.listDrag?.row(row, primary, task, target);
+      if (this.isProjectsView && primary) this.listDrag?.row(row, primary, task, target);
       if (foldable) this.renderRowFold(row, task, "subprojects");
       return;
     }
@@ -2700,6 +2749,6 @@ export class TaskMainView extends ItemView {
     }
     setIcon(icon, "circle-check-big");
     empty.createEl("h3", { text: "Nothing here" });
-    empty.createEl("p", { text: this.propertyFilters.length ? "No tasks match the current filters." : this.showCompleted ? "No tasks match this view." : "You're caught up. Completed tasks are hidden." });
+    empty.createEl("p", { text: this.propertyFilters.length ? "No tasks match the current filters." : this.showsCompleted ? "No tasks match this view." : "You're caught up. Completed tasks are hidden." });
   }
 }

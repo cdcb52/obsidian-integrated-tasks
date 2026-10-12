@@ -172,6 +172,24 @@ describe("re-rendering", () => {
     expect((document.activeElement as HTMLElement).getAttribute("data-task-id")).toBe("A.md:3");
   });
 
+  it("shows done and cancelled tasks when grouped by status, and every status checked in View options", async () => {
+    const { view, content } = await setup([["A.md", "- [ ] Open\n- [x] Shipped\n- [-] Dropped"]]);
+    await view.setState({ mode: "all" });
+    const checked = () => {
+      content().querySelector<HTMLButtonElement>('[data-tm-focus-key="option-status"]')!.click();
+      const options = Array.from(content().querySelectorAll(".tm-options-dropdown [aria-selected=true]")).map(option => option.textContent);
+      content().querySelector<HTMLButtonElement>('[data-tm-focus-key="option-status"]')!.click();
+      return options;
+    };
+    content().querySelector<HTMLButtonElement>(".tm-filter-toggle")!.click();
+    expect(checked()).toEqual(["View default", "To do", "In progress", "Waiting"]);
+    (view as unknown as { grouping: string }).grouping = "status";
+    view.render();
+    expect(Array.from(content().querySelectorAll(".tm-task-item .tm-task-title")).map(title => title.textContent)).toEqual(["Open", "Shipped", "Dropped"]);
+    content().querySelector<HTMLButtonElement>(".tm-filter-toggle")!.click();
+    expect(checked()).toEqual(["View default", "To do", "In progress", "Waiting", "Done", "Cancelled"]);
+  });
+
   it("keeps the options panel, an open dropdown and a half-built filter when tasks change", async () => {
     const { view, internals, content } = await setup([note("A.md", 3)]);
     await view.setState({ mode: "all" });
@@ -871,6 +889,31 @@ describe("the Projects view's subprojects", () => {
     expect(rows()).toEqual([["Site", "0"], ["Sub", "1"], ["Leaf", "2"]]);
     content().querySelector<HTMLButtonElement>(".tm-project-row .tm-row-fold")!.click();
     expect(rows()).toEqual([["Site", "0"]]);
+  });
+});
+
+describe("dragging in the Projects list", () => {
+  it("gives a project its group's status, and the parent of the place it is dropped in", async () => {
+    const { view, content, plugin } = await setup([note("Site.md", 1), note("Sub.md", 1), note("Home.md", 1)], {
+      "Site.md": { tags: ["project"] }, "Sub.md": { tags: ["project"], parent: "[[Site]]" }, "Home.md": { tags: ["project"] }
+    });
+    await view.setState({ mode: "projects" });
+    expect(content().querySelectorAll(".tm-project-row .tm-list-drag-handle")).toHaveLength(3);
+    const internal = view as unknown as { dropListTask(task: unknown, group: unknown, anchor?: unknown, placement?: string): Promise<void> };
+    const item = (name: string) => ({ id: `project:${name}.md` });
+    const todo = { property: "status", value: "To do" };
+    // Moved right, under Home: Home is its parent.
+    await internal.dropListTask(item("Sub"), todo, item("Home"), "child");
+    // Out from under Site, within its group: no parent.
+    await internal.dropListTask(item("Sub"), todo, item("Site"), "after");
+    // Beside a project with no parent, in its own group: where it was, so nothing changes.
+    await internal.dropListTask(item("Home"), todo, item("Site"), "after");
+    // To another group: its status, and its parent kept.
+    await internal.dropListTask(item("Sub"), { property: "status", value: "Waiting" }, item("Home"), "after");
+    // Under its own subproject: refused.
+    await internal.dropListTask(item("Site"), todo, item("Sub"), "child");
+    const changes = (plugin.updateProject.mock.calls as unknown as Array<[string, (draft: object) => object]>).map(([path, change]) => [path, change({})]);
+    expect(changes).toEqual([["Sub.md", { parent: "Home.md" }], ["Sub.md", { parent: "" }], ["Sub.md", { status: "waiting" }]]);
   });
 });
 

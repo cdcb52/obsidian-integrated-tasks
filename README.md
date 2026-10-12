@@ -155,7 +155,7 @@ You don't have to edit them by hand: the **…** beside a project's title, or a 
 
 Projects show their progress, counting subtasks. A project's `status` says where it stands; without one, it is **To do** until every task is done, then **Done**. Done and cancelled projects leave the sidebar, and their tasks stay in other views. In task mode a project's description shows in a card at the top of its page; click it to edit.
 
-The Projects view lists your projects grouped by status. Switch it to a board to drag projects between statuses, and use **View options** to filter, sort and group them as you would tasks.
+The Projects view lists your projects grouped by status. Drag a project to another status, in the list or on a board, or move it right under another project to make it a subproject. Use **View options** to filter, sort and group projects as you would tasks.
 
 Turn on **Task mode** (in the task sidebar, the ribbon, or with **Toggle task mode**) to open project notes as task views. Turn it off to edit them as regular notes.
 
