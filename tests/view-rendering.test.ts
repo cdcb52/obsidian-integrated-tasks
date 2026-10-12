@@ -818,6 +818,11 @@ describe("View options › Projects", () => {
     expect(projectRows().sort()).toEqual(["Launch", "Site"]);
     expect(content().querySelector(".tm-project-row .tm-project-progress")).not.toBeNull();
     expect(content().querySelector(".tm-project-row input[type=checkbox]")).toBeNull();
+    // A project with nothing under its name keeps its progress level with the name: said by a class, not by :has().
+    for (const row of Array.from(content().querySelectorAll<HTMLElement>(".tm-project-row"))) {
+      expect(row.classList.contains("is-single-line")).toBe(!row.querySelector(":scope > .tm-task-content > :is(.tm-task-metadata, .tm-things-secondary)"));
+    }
+    expect(content().querySelector(".tm-project-row.is-single-line")).not.toBeNull();
     // Today lists the project due today; Upcoming none of these.
     await view.setState({ mode: "today" });
     expect(projectRows()).toEqual(["Launch"]);

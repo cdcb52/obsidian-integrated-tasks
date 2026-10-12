@@ -372,7 +372,7 @@ export class NavDragController<T> {
         // before the drag ends, so a redraw the drag held back waits for it too.
         this.land(intent, [this.sources]);
         let written: Promise<void>;
-        try { written = intent.commit!(); } catch (error) { written = Promise.reject(error); }
+        try { written = intent.commit!(); } catch (error) { written = Promise.reject(error instanceof Error ? error : new Error(String(error))); }
         reset();
         void written.catch(() => {});
       });

@@ -26,7 +26,7 @@ export function navOrderFrom(value: unknown): NavOrder {
   return {
     projects: strings(saved.projects),
     tags: strings(saved.tags),
-    files: Object.fromEntries(Object.entries(files).map(([folder, names]) => [folder, strings(names)]).filter(([, names]) => names.length))
+    files: Object.fromEntries(Object.entries(files).map(([folder, names]): [string, string[]] => [folder, strings(names)]).filter(([, names]) => names.length > 0))
   };
 }
 

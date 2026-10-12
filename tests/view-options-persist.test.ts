@@ -184,6 +184,8 @@ describe("The Projects view", () => {
     expect(card().hidden).toBe(false);
     // Under the whole header: the title, its properties, the layouts and the buttons.
     expect(card().previousElementSibling?.classList.contains("tm-view-header")).toBe(true);
+    // The header sits closer to the card while it shows.
+    expect(card().previousElementSibling?.classList.contains("has-description")).toBe(true);
     expect(card().textContent).toBe("The new website.\nLaunch in spring.");
     card().click();
     const field = card().querySelector("textarea")!;
@@ -195,6 +197,7 @@ describe("The Projects view", () => {
     // Without one, there is no card.
     await view.setState({ mode: "all", pagePath: "Home.md" });
     expect(card().hidden).toBe(true);
+    expect(card().previousElementSibling?.classList.contains("has-description")).toBe(false);
   });
 });
 

@@ -193,7 +193,7 @@ export function parseTaskQuery(source: string, context: TaskQueryContext): Parse
         rest = rest.replace(/^(?:on|of|from|at)\s+/i, "").trim();
         const anchor = rest ? parseDateExpression(rest, context.now, context.dateFormat) : undefined;
         if (rest && !anchor) { fail(`"${rest}" isn't a date I understand. Try a date such as ${todayIso(context.now)}, today, or next friday.`); break; }
-        result.layout = layout as TaskQueryLayout;
+        result.layout = layout;
         if (scope) result.calendarScope = CALENDAR_SCOPES[scope[1].toLowerCase()];
         if (anchor) result.calendarAnchor = anchor;
         break;

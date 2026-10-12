@@ -1177,7 +1177,7 @@ export class TaskMainView extends ItemView {
     const card = this.headerDescription;
     if (!card || card.querySelector("textarea")) return;
     card.empty();
-    card.hidden = !project?.description;
+    this.showDescription(card, Boolean(project?.description));
     if (!project?.description) return;
     card.setText(project.description);
     card.setAttribute("role", "button");
@@ -1197,12 +1197,18 @@ export class TaskMainView extends ItemView {
     };
   }
 
+  /** Shows or hides the description card; the header above it sits closer to it while it shows. */
+  private showDescription(card: HTMLElement, shown: boolean): void {
+    card.hidden = !shown;
+    card.previousElementSibling?.toggleClass("has-description", shown);
+  }
+
   /** Edits the description in its card: leaving the field (or Cmd/Ctrl+Enter) saves it, Escape keeps the old one. */
   private editDescription(project: Project): void {
     const card = this.headerDescription;
     if (!card || card.querySelector("textarea")) return;
     card.empty();
-    card.hidden = false;
+    this.showDescription(card, true);
     card.removeAttribute("role");
     card.removeAttribute("tabindex");
     card.removeAttribute("aria-label");
@@ -1211,7 +1217,7 @@ export class TaskMainView extends ItemView {
     const original = project.description ?? "";
     const field = card.createEl("textarea", { cls: "tm-project-description-input", attr: { "aria-label": "Description", placeholder: "Add a description", rows: "3" } });
     field.value = original;
-    const fit = (): void => { field.style.height = "auto"; field.style.height = `${field.scrollHeight}px`; };
+    const fit = (): void => { field.setCssStyles({ height: "auto" }); field.setCssStyles({ height: `${field.scrollHeight}px` }); };
     let cancelled = false;
     const finish = (): void => {
       field.remove();
@@ -1323,7 +1329,7 @@ export class TaskMainView extends ItemView {
     if (!lists.length) container.createDiv({ cls: "tm-empty", text: "No smart lists yet. Save filters, sorting, and grouping to create one." });
     const entries = container.createDiv({ cls: "tm-task-list", attr: { role: "list" } });
     for (const list of lists) {
-      const row = entries.createDiv({ cls: "tm-task-row tm-project-row", attr: { role: "listitem" } });
+      const row = entries.createDiv({ cls: "tm-task-row tm-project-row is-single-line", attr: { role: "listitem" } });
       const icon = row.createSpan({ cls: "tm-project-icon" });
       setIcon(icon, "list-filter");
       const content = row.createDiv({ cls: "tm-task-content" });
@@ -1458,11 +1464,14 @@ export class TaskMainView extends ItemView {
       renderThingsProjectDetails({ lead, inline: primary, secondary }, project, { dateFormat: this.plugin.dateFormat(), edit: field => this.openProjectProperty(project, field), datesBelow: Platform.isPhone || board });
       if (!lead.childElementCount) lead.remove();
       if (!secondary.childElementCount) secondary.remove();
+      row.toggleClass("is-single-line", !secondary.parentElement);
       return row;
     }
     const metadata = content.createDiv({ cls: "tm-task-metadata tm-project-metadata tm-project-header-metadata" });
     renderProjectHeaderDetails(metadata, project, property => this.openProjectProperty(project, property), this.plugin.dateFormat(), undefined, primary, false, false);
     if (!metadata.childElementCount) metadata.remove();
+    // Nothing under the name: its progress sits level with it (see styles.css).
+    row.toggleClass("is-single-line", !metadata.parentElement);
     return row;
   }
 

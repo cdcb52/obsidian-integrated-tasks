@@ -1071,7 +1071,7 @@ button.tm-gantt-handle.is-finish:focus-visible,
   align-items: start;
   padding-top: 9px;
   padding-bottom: 9px;
-  column-gap: 8px;
+  gap: 0 8px;
 }
 .tm-main-view .tm-task-row.tm-task-item:not(.tm-project-row) .tm-checkbox-target { align-self: start; padding-top: 3px; }
 .tm-main-view .tm-task-row.tm-task-item:not(.tm-project-row) .tm-task-content {
@@ -1276,7 +1276,7 @@ input.tm-task-checkbox.is-cancelled:checked::after {
   font-weight: 400;
   color: var(--text-muted);
 }
-.tm-project-date-range { display: inline-flex; flex-wrap: wrap; column-gap: 4px; align-items: baseline; }
+.tm-project-date-range { display: inline-flex; flex-wrap: wrap; gap: 0 4px; align-items: baseline; }
 .tm-project-date-range [role="button"] { cursor: pointer; }
 .tm-project-date-range [role="button"]:hover { color: var(--text-normal); }
 .tm-project-header-metadata > .tm-project-progress:not(:first-child) { margin-inline-start: 4px; }
@@ -1373,7 +1373,7 @@ button.tm-gantt-handle::after { content: ""; position: absolute; top: 0; bottom:
 .tm-main-view .tm-project-row button.tm-task-title { height: auto; min-height: 0; padding-block: 0; line-height: 1.4; }
 .tm-main-view .tm-project-row > .tm-project-icon { margin: 0; height: 1.4em; font-size: var(--font-ui-medium); align-items: center; }
 /* A row with nothing under its name sits in the middle of the row, so its progress (or icon) does too, level with the name. */
-.tm-main-view .tm-project-row:not(:has(> .tm-task-content > :is(.tm-task-metadata, .tm-things-secondary))) > .tm-project-icon { align-self: center; }
+.tm-main-view .tm-project-row.is-single-line > .tm-project-icon { align-self: center; }
 .tm-project-header-metadata .tm-project-progress { gap: 4px; min-height: 0; }
 .tm-project-percentage { min-width: 0; text-align: left; }
 /* Each grid edge is drawn once. */
@@ -1503,7 +1503,6 @@ button.tm-gantt-handle::after { content: ""; position: absolute; top: 0; bottom:
   margin: -1px;
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
-  clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
 }
@@ -1584,7 +1583,7 @@ button.tm-project-color-swatch:focus-visible { outline: 2px solid var(--interact
 /* Density */
 /* Compact tightens spacing only; font sizes stay as in the comfortable layout. */
 .tm-density-compact .tm-task-row { min-height: 32px; padding-top: 2px; padding-bottom: 2px; }
-.tm-density-compact .tm-task-row.tm-task-item { padding-top: 3px; padding-bottom: 3px; column-gap: 6px; }
+.tm-density-compact .tm-task-row.tm-task-item { padding-top: 3px; padding-bottom: 3px; gap: 0 6px; }
 .tm-density-compact .tm-task-row.tm-task-item:not(.tm-project-row) .tm-checkbox-target { padding-top: 2px; }
 .tm-density-compact .tm-task-row.tm-task-item:not(.tm-project-row) .tm-task-content { gap: 0; }
 .tm-density-compact .tm-task-row.tm-task-item:not(.tm-project-row) .tm-task-primary { gap: 4px; }
@@ -1853,7 +1852,7 @@ body.is-phone .tm-options-panel { position: fixed; top: calc(8px + env(safe-area
   grid-template-columns: 16px minmax(0, 1fr);
   /* The title lines up with the checkbox, including a narrow window's taller touch target around it. */
   align-items: center;
-  column-gap: 10px;
+  gap: 0 10px;
   min-height: 0;
   padding: 5px 8px 5px calc(8px + var(--tm-depth) * 24px);
   border-radius: 0;
@@ -1996,7 +1995,7 @@ body.is-phone .tm-main-view.tm-style-things .tm-task-row.tm-task-item:not(.tm-pr
   box-shadow: var(--shadow-l), inset 0 0 0 1px color-mix(in srgb, var(--text-normal) 5%, transparent);
   font-family: var(--font-interface);
 }
-.tm-things-card-head { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 10px; align-items: start; padding-left: 0; }
+.tm-things-card-head { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 0 10px; align-items: start; padding-left: 0; }
 .tm-things-card-head .tm-task-checkbox { --checkbox-size: 14px; --checkbox-radius: 3px; width: 14px; height: 14px; margin: 3px 0 0; border-width: 1px; }
 .tm-main-view textarea.tm-things-card-title,
 .tm-main-view textarea.tm-things-card-notes {
@@ -2173,7 +2172,7 @@ button.tm-editor-property.is-p3 .tm-editor-property-icon { color: var(--color-bl
 /* Things style: project rows in the Projects list read like Things' project rows. */
 .tm-main-view.tm-style-things .tm-task-row.tm-things-project-row {
   grid-template-columns: 16px minmax(0, 1fr);
-  column-gap: 10px;
+  gap: 0 10px;
   align-items: start;
   min-height: 0;
   padding: 5px 8px 5px calc(8px + var(--tm-depth) * 24px);
@@ -2207,7 +2206,7 @@ button.tm-editor-property.is-p3 .tm-editor-property-icon { color: var(--color-bl
 /* Things style: board cards read like an open task card rather than a squeezed one-line row. */
 .tm-main-view.tm-style-things .tm-kanban .tm-task-row.tm-things-board-card {
   grid-template-columns: 16px minmax(0, 1fr);
-  column-gap: 10px;
+  gap: 0 10px;
   align-items: start;
   min-height: 0;
   padding: 12px 14px 10px 10px;
@@ -2250,7 +2249,7 @@ button.tm-editor-property.is-p3 .tm-editor-property-icon { color: var(--color-bl
 .tm-kanban .tm-things-board-card .tm-things-secondary { gap: 6px; }
 /* Board cards keep property lines short: no "since …", "N days ago/left" or priority code beside the labels.
    The icon stays beside the label's first line when a long label wraps. */
-.tm-kanban .tm-things-board-card .tm-things-card-property { display: grid; grid-template-columns: 14px minmax(0, 1fr); column-gap: 7px; align-items: start; }
+.tm-kanban .tm-things-board-card .tm-things-card-property { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 7px; align-items: start; }
 .tm-kanban .tm-things-board-card .tm-things-card-icon { margin-top: 2px; }
 .tm-kanban .tm-things-board-card .tm-things-card-extra { display: none; }
 
@@ -2618,7 +2617,7 @@ button.tm-sidebar-open-note:hover, button.tm-sidebar-open-note:focus-visible { b
 .tm-sidebar-head {
   /* The title in the normal text size; the checkbox and close button centre on its first line. */
   --tm-sidebar-title-size: var(--font-text-size, 16px);
-  display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; column-gap: 8px; align-items: start;
+  display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 0 8px; align-items: start;
   padding-bottom: var(--size-4-3); border-bottom: 1px solid var(--background-modifier-border);
 }
 /* The checkbox sits in a box as tall as the title's first line, centred on it, whatever the style's checkbox size. */
@@ -2669,7 +2668,7 @@ button.tm-sidebar-open-note:hover, button.tm-sidebar-open-note:focus-visible { b
 /* As the task's own head (and a list's rows): the checkbox centred in a 22px column, the title 8px after it, so each
    subtask's checkbox and title line up under the task's. The row to add one is laid out the same. */
 .tm-sidebar-subtask {
-  display: grid; grid-template-columns: 22px minmax(0, 1fr); column-gap: 8px; align-items: center;
+  display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 0 8px; align-items: center;
   min-height: 30px; border-radius: var(--radius-s); font-size: var(--font-ui-small);
 }
 .tm-sidebar-subtask:hover { background: var(--background-modifier-hover); }
@@ -2732,7 +2731,7 @@ button.tm-options-update:disabled { color: var(--text-faint); cursor: default; }
 .tm-things-trailing .tm-project-status { margin-inline-end: 8px; color: var(--text-muted); }
 
 /* A project page's description, in a card under the whole header, shaded as the layout switcher is. */
-.tm-view-header:has(+ .tm-project-description:not([hidden])) { margin-bottom: var(--size-4-3); }
+.tm-view-header.has-description { margin-bottom: var(--size-4-3); }
 .tm-project-description {
   margin-bottom: var(--size-4-8);
   padding: var(--size-4-3) var(--size-4-4);
