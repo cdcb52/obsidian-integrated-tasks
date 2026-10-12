@@ -1061,7 +1061,7 @@ export class TaskMainView extends ItemView {
         { kind: "submenu", label: "Rename", icon: "pencil", key: "n", open: target => {
           openChoicePopover({
             anchor: target, beside: true, label: "Rename smart list", choices: [],
-            input: { placeholder: list.name, invalid: "", parse: text => text && text !== list.name ? { value: text, label: `Rename to “${text}”` } : undefined },
+            input: { placeholder: "Smart list name", value: list.name, invalid: "", parse: text => text && text !== list.name ? { value: text, label: `Rename to “${text}”` } : undefined },
             choose: name => { menu.close(); save({ ...smartListDraft(list), name }, `Renamed to “${name}”`); }
           });
         } },
@@ -1158,7 +1158,7 @@ export class TaskMainView extends ItemView {
     } else if (property === "name") {
       openChoicePopover({
         anchor, beside, label: "Rename project", choices: [],
-        input: { placeholder: project.name, invalid: "", parse: text => text && text !== project.name ? { value: text, label: `Rename to “${text}”` } : undefined },
+        input: { placeholder: "Project name", value: project.name, invalid: "", parse: text => text && text !== project.name ? { value: text, label: `Rename to “${text}”` } : undefined },
         choose: name => save(draft => ({ ...draft, name }))
       });
     }

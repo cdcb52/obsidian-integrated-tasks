@@ -118,6 +118,23 @@ describe("a field above the choices", () => {
     expect(handle.element.isConnected).toBe(false);
   });
 
+  it("opens with the current text in the field, selected so typing replaces it", () => {
+    const { handle, choose, field, type, key } = withInput({
+      placeholder: "Project name", value: "Work", invalid: "",
+      parse: text => text && text !== "Work" ? { value: text, label: `Rename to “${text}”` } : undefined
+    });
+    expect(field.value).toBe("Work");
+    expect(field.placeholder).toBe("Project name");
+    expect(document.activeElement).toBe(field);
+    expect([field.selectionStart, field.selectionEnd]).toEqual([0, 4]);
+    expect(handle.element.querySelector(".tm-choice-hint")!.textContent).toBe("");
+    key(field, "Enter");
+    expect(choose).not.toHaveBeenCalled();
+    type("Office");
+    key(field, "Enter");
+    expect(choose).toHaveBeenCalledExactlyOnceWith("Office");
+  });
+
   it("reads a typed value, shows how it reads, and picks it with Enter", () => {
     const { handle, choose, field, type, key } = withInput({
       placeholder: "Type a repeat", invalid: "Not a repeat",

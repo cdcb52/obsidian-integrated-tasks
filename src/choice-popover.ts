@@ -35,6 +35,8 @@ export interface ChoicePopoverOptions {
 
 export interface ChoiceInput {
   placeholder: string;
+  /** Text the field opens with, selected so typing replaces it, such as the name being changed. */
+  value?: string;
   /** Typing narrows the choices to those whose label contains the text; Enter picks the first. */
   filter?: boolean;
   /** Reads the typed text as a value of its own ("every 3 days"), shown below the field and picked with Enter. */
@@ -159,7 +161,11 @@ export function openChoicePopover(options: ChoicePopoverOptions): { element: HTM
   const handle = { element, close };
   open = handle;
   registerDismiss(element, close, options.anchor);
-  if (input) input.focus();
+  if (input) {
+    if (typed?.value) { input.value = typed.value; paint(); }
+    input.focus();
+    input.select();
+  }
   else (items.find(item => item.getAttribute("aria-selected") === "true") ?? items[0])?.focus();
   return handle;
 }
