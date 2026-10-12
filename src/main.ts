@@ -37,6 +37,7 @@ import { dailyNoteDateFormat } from "./daily-notes";
 import { TaskQuickSwitcher } from "./quick-switcher";
 import { openProjectMenu as showProjectMenu } from "./project-menu";
 import { forgetSidebarPaths, navOrderFrom, renameSidebarPaths } from "./sidebar-order";
+import { leafFor } from "./leaves";
 import { TaskSidebarView, TASK_SIDEBAR_VIEW } from "./task-sidebar";
 
 const LEGACY_SETTINGS = ["taskListRowHeight", "taskListRowHeightMultiplier", "hiddenListTaskProperties", "hiddenKanbanTaskProperties", "tasksHeading", "taskDeadlineDisplay", "linkTags", "taskHoverHighlight", "wrapTaskTitles", "wrapCalendarTaskTitles", "wrapKanbanTaskTitles", "showSubtaskCounts", "showGroupTaskCounts", "weeklyReview"];
@@ -449,10 +450,16 @@ export default class TaskManagerPlugin extends Plugin {
     }
   }
 
-  async openTaskView(state: TaskViewState): Promise<void> {
+  /**
+   * Opens a task list. From the task sidebar (`newLeaf`), it opens where a file from there would: in the tab in front,
+   * whatever that shows, or (true) a new one. Otherwise it goes to the tab already listing tasks, or a new one.
+   */
+  async openTaskView(state: TaskViewState, { newLeaf }: { newLeaf?: PaneType | boolean } = {}): Promise<void> {
     if (state.projectPath && !state.pagePath) return this.openProject(state.projectPath);
     await this.activateNavigation(false);
-    let leaf: WorkspaceLeaf | undefined = this.app.workspace.getLeavesOfType(TASK_MAIN_VIEW).find((candidate) => !candidate.view.getState().pagePath);
+    let leaf: WorkspaceLeaf | undefined = newLeaf === undefined
+      ? this.app.workspace.getLeavesOfType(TASK_MAIN_VIEW).find((candidate) => !candidate.view.getState().pagePath)
+      : leafFor(this.app, newLeaf);
     const existingView = leaf?.view;
     if (!leaf) leaf = this.app.workspace.getLeaf("tab");
     await leaf.setViewState({ type: TASK_MAIN_VIEW, active: true, state: { ...state } });
@@ -629,7 +636,7 @@ export default class TaskManagerPlugin extends Plugin {
   async openProject(path: string, { keepTaskMode = false, newLeaf = "tab" }: { keepTaskMode?: boolean; newLeaf?: PaneType | boolean } = {}): Promise<void> {
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!(file instanceof TFile)) throw new Error("Project note no longer exists.");
-    const leaf = this.leafFor(newLeaf);
+    const leaf = leafFor(this.app, newLeaf);
     await leaf.openFile(file);
     if (!this.settings.taskMode && !keepTaskMode) await this.setTaskMode(true);
     else await this.taskModeController?.sync();
@@ -640,10 +647,10 @@ export default class TaskManagerPlugin extends Plugin {
   }
 
   /** Opens a tag's view, or its note as one (turning task mode on unless `keepTaskMode`, and where `newLeaf` says, as for a project). */
-  async openTag(tag: string, { keepTaskMode = false, newLeaf = "tab" }: { keepTaskMode?: boolean; newLeaf?: PaneType | boolean } = {}): Promise<void> {
+  async openTag(tag: string, { keepTaskMode = false, newLeaf }: { keepTaskMode?: boolean; newLeaf?: PaneType | boolean } = {}): Promise<void> {
     const file = this.index.tagFile(tag);
-    if (!file) return this.openTaskView({ mode: "tags", tag });
-    const leaf = this.leafFor(newLeaf);
+    if (!file) return this.openTaskView({ mode: "tags", tag }, { newLeaf });
+    const leaf = leafFor(this.app, newLeaf ?? "tab");
     await leaf.openFile(file);
     if (!this.settings.taskMode && !keepTaskMode) await this.setTaskMode(true);
     else await this.taskModeController?.sync();
@@ -651,16 +658,6 @@ export default class TaskManagerPlugin extends Plugin {
     for (const navLeaf of this.app.workspace.getLeavesOfType(TASK_NAV_VIEW)) {
       if (navLeaf.view instanceof TaskNavigationView) navLeaf.view.setActive("tags", tag);
     }
-  }
-
-  /**
-   * A new tab, split or window, as `getLeaf` gives; or for false the tab in front (unless pinned), whatever it shows: a
-   * task list is no note, so Obsidian's own choice would open a new tab beside it.
-   */
-  private leafFor(newLeaf: PaneType | boolean): WorkspaceLeaf {
-    if (newLeaf) return this.app.workspace.getLeaf(newLeaf);
-    const front = this.app.workspace.getMostRecentLeaf?.(this.app.workspace.rootSplit);
-    return front && !front.getViewState().pinned ? front : this.app.workspace.getLeaf(false);
   }
 
   private pendingRecurringNotes = new Set<string>();

@@ -161,7 +161,7 @@ it("shows favourites as their own sections do, leaving out what is gone", async 
   row("favorite:project:Site.md")!.querySelector<HTMLElement>(".tm-nav-label")!.click();
   expect(plugin.openProject).toHaveBeenCalledWith("Site.md", { keepTaskMode: true, newLeaf: false });
   row("favorite:mode:inbox")!.querySelector<HTMLElement>(".tm-nav-label")!.click();
-  expect(plugin.openTaskView).toHaveBeenCalledWith({ mode: "inbox" });
+  expect(plugin.openTaskView).toHaveBeenCalledWith({ mode: "inbox" }, { newLeaf: false });
   row("favorite:file:Notes.md")!.querySelector<HTMLElement>(".tm-nav-label")!.click();
   await vi.waitFor(() => expect(openFile).toHaveBeenCalledOnce());
   // A folder opens in place, listing what is in it.

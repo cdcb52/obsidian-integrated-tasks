@@ -109,7 +109,7 @@ it("lists the vault's files below everything else only when the setting is on", 
 });
 
 it("opens folders in place, remembers them, and opens files (in a new tab with the modifier)", async () => {
-  const { view, settings, labels, row, getLeaf, openFile } = setup();
+  const { view, settings, labels, row, getLeaf, openFile, app, work } = setup();
   settings.showFiles = true;
   view.refresh();
   expect(row("file:Notes 10.md").classList.contains("is-active")).toBe(true);
@@ -122,6 +122,13 @@ it("opens folders in place, remembers them, and opens files (in a new tab with t
   await Promise.resolve();
   expect(getLeaf).toHaveBeenLastCalledWith(true);
   expect(openFile).toHaveBeenCalledOnce();
+  // Without it, a file opens in the tab in front, even one listing tasks (Obsidian would open a new tab beside it).
+  const front = { getViewState: () => ({ type: "task-manager-main" }), openFile: vi.fn(async () => {}) };
+  Object.assign(app.workspace, { getMostRecentLeaf: () => front, rootSplit: {} });
+  (row("file:Work/Plan.md").querySelector(".tm-nav-label") as HTMLElement).click();
+  await Promise.resolve();
+  expect(front.openFile).toHaveBeenCalledExactlyOnceWith(work.children[0]);
+  expect(getLeaf).toHaveBeenCalledOnce();
   // The open folders come back with the sidebar.
   const next = setup();
   next.settings.showFiles = true;

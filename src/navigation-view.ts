@@ -5,6 +5,7 @@ import { activeProjects, renderProjectProgress } from "./project-progress";
 import { projectHierarchy } from "./project-hierarchy";
 import { activeTaskDrag, highlightDropTarget, markDropTarget, TASK_DRAG_TYPE, type SidebarDrop } from "./sidebar-drop";
 import { inOrder, moveKey } from "./sidebar-order";
+import { leafFor } from "./leaves";
 
 export const TASK_NAV_VIEW = "task-manager-navigation";
 
@@ -370,7 +371,7 @@ export class TaskNavigationView extends ItemView {
     for (const { section, label, icon, open } of NAV_SECTIONS) {
       const group = nav.createDiv({ cls: "tree-item nav-folder tm-nav-group tm-nav-section" });
       const heading = open
-        ? this.item(group, `mode:${open}`, label, this.listActive(open), () => this.plugin.openTaskView({ mode: open }), { icon, color: "section" })
+        ? this.item(group, `mode:${open}`, label, this.listActive(open), event => this.plugin.openTaskView({ mode: open }, { newLeaf: Keymap.isModEvent(event) }), { icon, color: "section" })
         : this.item(group, section, label, false, () => this.toggleSection(section), { icon, color: "section", expanded: this.expanded.has(section) });
       if (open) heading.addEventListener("contextmenu", event => this.openItemMenu(event, `mode:${open}`));
       if (!this.folder(heading, section, label)) { group.addClass("is-folded"); continue; }
@@ -484,7 +485,8 @@ export class TaskNavigationView extends ItemView {
     const entry = NAV_GROUPS.flat().find(item => item.mode === mode);
     const glyph = projects ? { icon: NAV_SECTIONS[0].icon, color: "muted" } : listGlyph(mode, this.settings.style)!;
     const count = entry?.count ? this.plugin.index.query({ mode, showCompleted: false }).length : undefined;
-    const row = this.item(parent, key, projects ? NAV_SECTIONS[0].label : entry?.label ?? mode, this.listActive(mode), () => this.plugin.openTaskView({ mode }), { ...glyph, count });
+    const row = this.item(parent, key, projects ? NAV_SECTIONS[0].label : entry?.label ?? mode, this.listActive(mode),
+      event => this.plugin.openTaskView({ mode }, { newLeaf: Keymap.isModEvent(event) }), { ...glyph, count });
     if (mode === "inbox" || mode === "today") this.dropTarget(row, { kind: mode });
     row.addEventListener("contextmenu", event => this.openItemMenu(event, `mode:${mode}`));
     return row;
@@ -493,7 +495,8 @@ export class TaskNavigationView extends ItemView {
   private smartListRow(parent: HTMLElement, id: string, key: string): HTMLElement | undefined {
     const list = this.settings.smartLists.find(item => item.id === id);
     if (!list) return undefined;
-    const row = this.item(parent, key, list.name, this.activeSmartList === list.id, () => this.plugin.openTaskView({ mode: "smartLists", smartListId: list.id }), SMART_LIST_GLYPH);
+    const row = this.item(parent, key, list.name, this.activeSmartList === list.id,
+      event => this.plugin.openTaskView({ mode: "smartLists", smartListId: list.id }, { newLeaf: Keymap.isModEvent(event) }), SMART_LIST_GLYPH);
     row.addEventListener("contextmenu", event => this.openItemMenu(event, `list:${list.id}`));
     return row;
   }
@@ -945,7 +948,7 @@ export class TaskNavigationView extends ItemView {
     const row = file instanceof TFolder
       ? this.item(parent, key, file.name, false, () => { toggle(); this.render(); }, { icon: open ? "folder-open" : "folder", color: "muted", expanded: open })
       : this.item(parent, key, file.basename, file.path === this.activeFile,
-        event => this.app.workspace.getLeaf(Keymap.isModEvent(event)).openFile(file), { icon: FILE_ICONS[file.extension.toLowerCase()] ?? "file", color: "muted" });
+        event => leafFor(this.app, Keymap.isModEvent(event)).openFile(file), { icon: FILE_ICONS[file.extension.toLowerCase()] ?? "file", color: "muted" });
     row.addClass(isFolder ? "tm-nav-folder" : "tm-nav-file");
     row.style.setProperty("--tm-nav-depth", String(depth));
     row.addEventListener("contextmenu", event => this.openFileMenu(event, file, scope));
@@ -994,7 +997,7 @@ export class TaskNavigationView extends ItemView {
     const parent = folder ?? this.app.fileManager.getNewFileParent(this.app.workspace.getActiveFile()?.path ?? "");
     const note = await this.app.vault.create(this.availablePath(parent, "Untitled", ".md"), "");
     if (this.settings.showFiles) this.showFolder(parent);
-    await this.app.workspace.getLeaf(false).openFile(note, { active: true, state: { mode: "source" }, eState: { rename: "all" } });
+    await leafFor(this.app, false).openFile(note, { active: true, state: { mode: "source" }, eState: { rename: "all" } });
   }
 
   /** Makes an untitled folder in `folder` and names it in place. */

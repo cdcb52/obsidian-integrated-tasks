@@ -3,7 +3,7 @@ import { beforeAll, expect, it, vi } from "vitest";
 import { installObsidianDom } from "./helpers/obsidian-dom";
 
 vi.mock("obsidian", async importOriginal => {
-  return { ...await importOriginal<typeof import("./obsidian-mock")>(), Notice: class {}, setIcon: vi.fn() };
+  return { ...await importOriginal<typeof import("./obsidian-mock")>(), Keymap: { isModEvent: (event: MouseEvent) => event.metaKey }, Notice: class {}, setIcon: vi.fn() };
 });
 
 import type { WorkspaceLeaf } from "obsidian";
@@ -70,6 +70,6 @@ it("keeps the list as it is while a row is pressed, so one tap opens it", async 
   expect(inbox()).toBe(pressed);
   window.dispatchEvent(new Event("pointerup"));
   pressed.click();
-  expect(openTaskView).toHaveBeenCalledExactlyOnceWith({ mode: "inbox" });
+  expect(openTaskView).toHaveBeenCalledExactlyOnceWith({ mode: "inbox" }, { newLeaf: false });
   await view.onClose();
 });

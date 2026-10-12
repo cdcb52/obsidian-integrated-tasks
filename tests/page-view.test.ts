@@ -433,6 +433,33 @@ it("opens a project from the task sidebar in the tab in front unless it is pinne
   expect(front.openFile).toHaveBeenCalledOnce();
 });
 
+it("opens a task list from the task sidebar in the tab in front, whatever it shows, and elsewhere in the tab listing tasks", async () => {
+  const plugin = new TaskManagerPlugin({} as App, {} as never);
+  const leaf = (type: string, pinned = false) => ({ view: { getState: () => ({}) }, getViewState: () => ({ type, pinned }), setViewState: vi.fn().mockResolvedValue(undefined) });
+  // A note is in front; another tab already lists tasks.
+  const [note, list, fresh] = [leaf("markdown"), leaf("task-manager-main"), leaf("empty")];
+  let front = note;
+  const getLeaf = vi.fn(() => fresh);
+  plugin.app = { workspace: {
+    getLeavesOfType: (type: string) => type === "task-manager-main" ? [list] : [], getLeaf, getMostRecentLeaf: () => front, rootSplit: {}, revealLeaf: vi.fn()
+  } } as unknown as App;
+  vi.spyOn(plugin, "activateNavigation").mockResolvedValue(undefined);
+  await plugin.openTaskView({ mode: "today" }, { newLeaf: false });
+  expect(note.setViewState).toHaveBeenCalledExactlyOnceWith({ type: "task-manager-main", active: true, state: { mode: "today" } });
+  expect(list.setViewState).not.toHaveBeenCalled();
+  // A pinned tab stays as it is; a modifier key opens a new tab.
+  front = leaf("markdown", true);
+  await plugin.openTaskView({ mode: "upcoming" }, { newLeaf: false });
+  expect(getLeaf).toHaveBeenLastCalledWith(false);
+  await plugin.openTaskView({ mode: "all" }, { newLeaf: "tab" });
+  expect(getLeaf).toHaveBeenLastCalledWith("tab");
+  expect(fresh.setViewState).toHaveBeenCalledTimes(2);
+  // From anywhere else (a command), it goes to the tab already listing tasks.
+  await plugin.openTaskView({ mode: "inbox" });
+  expect(list.setViewState).toHaveBeenCalledExactlyOnceWith({ type: "task-manager-main", active: true, state: { mode: "inbox" } });
+  expect(getLeaf).toHaveBeenCalledTimes(2);
+});
+
 it("routes legacy project navigation through file opening", async () => {
   const plugin = new TaskManagerPlugin({} as App, {} as never);
   const open = vi.spyOn(plugin, "openProject").mockResolvedValue(undefined);
@@ -635,7 +662,10 @@ it("keeps tags without notes accessible without creating a file", async () => {
   plugin.index = { tagFile: () => undefined } as never;
   const open = vi.spyOn(plugin, "openTaskView").mockResolvedValue(undefined);
   await plugin.openTag("missing");
-  expect(open).toHaveBeenCalledExactlyOnceWith({ mode: "tags", tag: "missing" });
+  expect(open).toHaveBeenCalledExactlyOnceWith({ mode: "tags", tag: "missing" }, { newLeaf: undefined });
+  // From the task sidebar, it opens where the sidebar opens things.
+  await plugin.openTag("missing", { newLeaf: false });
+  expect(open).toHaveBeenLastCalledWith({ mode: "tags", tag: "missing" }, { newLeaf: false });
 });
 
 it("queries a file-backed tag across the vault instead of restricting results to the tag note", async () => {
