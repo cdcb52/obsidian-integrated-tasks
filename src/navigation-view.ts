@@ -304,7 +304,7 @@ export class TaskNavigationView extends ItemView {
         tree.forEach(({ project, depth }, index) => {
           if (hiddenBelow !== undefined && depth > hiddenBelow) return;
           hiddenBelow = undefined;
-          const row = item(children, `project:${project.path}`, project.name, this.activeProject === project.path, () => this.plugin.openProject(project.path));
+          const row = item(children, `project:${project.path}`, project.name, this.activeProject === project.path, () => this.plugin.openProject(project.path, { keepTaskMode: true }));
           this.dropTarget(row, { kind: "project", path: project.path });
           row.style.setProperty("--tm-nav-depth", String(depth));
           // Its progress, as a pie in its colour, stands where a list's icon does.
@@ -322,7 +322,7 @@ export class TaskNavigationView extends ItemView {
       } else {
         const tags = this.plugin.index.tagSummaries();
         for (const tag of tags) {
-          const row = item(children, `tag:${tag.name}`, tag.name, this.activeTag === tag.name, () => this.plugin.openTag(tag.name), TAG_GLYPH.icon, TAG_GLYPH.color, tag.openTasks);
+          const row = item(children, `tag:${tag.name}`, tag.name, this.activeTag === tag.name, () => this.plugin.openTag(tag.name, { keepTaskMode: true }), TAG_GLYPH.icon, TAG_GLYPH.color, tag.openTasks);
           this.dropTarget(row, { kind: "tag", tag: tag.name });
         }
         if (!tags.length) children.createDiv({ cls: "tm-nav-empty", text: "No tags yet" });

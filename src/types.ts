@@ -44,6 +44,10 @@ export type ProjectProperties = Pick<ParsedTaskMetadata, "scheduledDate" | "sche
   endDate?: string;
   /** A validated CSS colour from the `color` property; on `Project`, inherited from the nearest coloured ancestor. */
   color?: string;
+  /** The `status` property, read as a task status ("In progress", "on hold"…); unset or unrecognised: undefined. */
+  status?: TaskStatus;
+  /** The `description` property's text. */
+  description?: string;
 };
 
 export interface Project extends ProjectProperties {

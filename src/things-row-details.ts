@@ -2,6 +2,7 @@ import { setIcon } from "obsidian";
 import { formatDate, todayIso } from "./date";
 import { deadlineIsOverdue, editable, taskDayDistance, taskDoneDateLabel, taskTimeDurationLabel, taskTimeLabel, type TaskDetailsOptions } from "./task-row-details";
 import type { ProjectDraft } from "./project-creator";
+import { STATUS_ICONS, STATUS_LABELS } from "./task-status";
 import type { Project, Task } from "./types";
 
 /** Where the Things style places a row's details: before the title, after it on the same line, and on a quieter line below. */
@@ -120,6 +121,16 @@ export function renderThingsTaskDetails(parts: ThingsRowParts, task: Task, optio
     }
 }
 
+/** A project's `status` property, when it has one: its icon and name, which open the status list. */
+export function renderProjectStatus(parent: HTMLElement, project: Project, edit: (field: keyof ProjectDraft) => void): void {
+    if (!project.status) return;
+    const label = STATUS_LABELS[project.status];
+    const status = parent.createSpan({ cls: `tm-project-status is-${project.status}`, attr: { title: `Status: ${label}` } });
+    setIcon(status.createSpan({ cls: "tm-task-detail-icon", attr: { "aria-hidden": "true" } }), STATUS_ICONS[project.status]);
+    status.createSpan({ text: label });
+    editable(status, `Edit project status: ${label}`, "project-status", () => edit("status"));
+}
+
 export interface ThingsProjectOptions {
     dateFormat: string;
     now?: Date;
@@ -141,6 +152,7 @@ export function renderThingsProjectDetails(parts: ThingsRowParts, project: Proje
     // At the end of the line (or below the name): the dates (a start still ahead reads like a task's; a range while
     // it runs), then the deadline.
     const trailing = (options.datesBelow ? parts.secondary : parts.inline).createSpan({ cls: "tm-things-trailing" });
+    renderProjectStatus(trailing, project, options.edit);
     if (project.scheduledDate && project.endDate) {
         // One calendar icon for the range; each end opens its own date's popover.
         const range = dateText(trailing, "tm-things-when tm-things-range", "",

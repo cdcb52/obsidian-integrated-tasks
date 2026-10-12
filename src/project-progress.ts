@@ -1,3 +1,4 @@
+import { isClosedStatus } from "./task-status";
 import type { Project, ProjectTotals } from "./types";
 
 /** A fixed outline with an inset pie fill, matching the project's completion ratio. */
@@ -63,7 +64,8 @@ export function projectStatuses(projects: Project[]): Map<string, ProjectStatus>
     if (seen.has(project.path)) return "active";
     seen.add(project.path);
     const { open, completed } = totals.get(project.path)!;
-    const done = open === 0 && completed > 0
+    // A status property says it outright; otherwise a project is done once all its tasks and subprojects are.
+    const done = project.status ? isClosedStatus(project.status) : open === 0 && completed > 0
       && !(children.get(project.path) ?? []).some(child => status(child, seen) === "active");
     const result: ProjectStatus = project.archived ? "archived" : done ? "completed" : "active";
     statuses.set(project.path, result);

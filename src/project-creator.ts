@@ -2,7 +2,8 @@ import { Modal, type App } from "obsidian";
 import { formatDate, parseDateExpression } from "./date";
 import { presentAsBottomSheet, trackModalViewport } from "./mobile-layout";
 import { PROJECT_COLORS, projectColorName, projectColorValue } from "./project-properties";
-import type { Project } from "./types";
+import { STATUS_LABELS, TASK_STATUSES } from "./task-status";
+import type { Project, TaskStatus } from "./types";
 
 export interface ProjectDraft {
   name: string;
@@ -15,6 +16,8 @@ export interface ProjectDraft {
   archived: boolean;
   /** A colour name or hex; "" removes the property and undefined leaves it unchanged. */
   color?: string;
+  /** A task status ("doing"…); "" removes the property and undefined leaves it unchanged. */
+  status?: string;
 }
 interface ProjectCreatorOptions {
   projects: Project[];
@@ -173,14 +176,17 @@ export function projectDraftProperties(draft: ProjectDraft, dateFormat: string, 
   if (draft.priority && !/^[123]$/.test(draft.priority)) throw new Error("Select a valid priority.");
   const color = draft.color ? projectColorName(draft.color) : undefined;
   if (draft.color && !color) throw new Error("Enter a color as a hex value such as #3366ff.");
+  const status = draft.status ? (TASK_STATUSES as readonly string[]).includes(draft.status) ? STATUS_LABELS[draft.status as TaskStatus] : undefined : undefined;
+  if (draft.status && !status) throw new Error("Select a valid status.");
   const tags = [...new Set(["project", ...draft.tags.split(/[,\s]+/).map(tag => tag.replace(/^#/, "")).filter(tag => Boolean(tag) && tag !== "archived")])];
   if (draft.archived && !tags.includes("archived")) tags.push("archived");
   return {
     tags, date: date(draft.date, "start date"), "end date": date(draft.endDate, "end date"),
     deadline: date(draft.deadline, "deadline"), priority: draft.priority ? Number(draft.priority) : null,
     parent: draft.parent ? `[[${draft.parent.replace(/\.md$/i, "")}]]` : null,
-    // No placeholder when unset: an empty colour means none.
-    ...(color ? { color } : {})
+    // No placeholder when unset: an empty colour or status means none.
+    ...(color ? { color } : {}),
+    ...(status ? { status } : {})
   };
 }
 

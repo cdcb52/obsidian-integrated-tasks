@@ -35,3 +35,11 @@ it("counts a subproject's tasks towards its parent, leaving an archived one out"
   expect(projectTotals(projects).get("Garden.md")).toEqual({ open: 0, completed: 1 });
   expect(Object.fromEntries(projectStatuses(projects))).toMatchObject({ "House.md": "active", "Trip.md": "completed", "Garden.md": "completed" });
 });
+
+it("lets a status property say whether a project is done, whatever its tasks", () => {
+  const projects = [
+    project("Started", 0, 3, { status: "doing" }), project("Shipped", 2, 0, { status: "done" }), project("Dropped", 1, 0, { status: "cancelled" }),
+    project("Paused", 0, 0, { status: "waiting", archived: true })
+  ];
+  expect(Object.fromEntries(projectStatuses(projects))).toEqual({ "Started.md": "active", "Shipped.md": "completed", "Dropped.md": "completed", "Paused.md": "archived" });
+});

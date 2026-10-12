@@ -697,7 +697,7 @@ describe("project actions", () => {
     more.click();
     expect(more.getAttribute("aria-expanded")).toBe("true");
     const labels = Array.from(document.querySelectorAll(".tm-task-menu button")).map(button => button.getAttribute("aria-label") ?? button.querySelector(".tm-task-menu-label")?.textContent);
-    expect(labels).toEqual(["P1", "P2", "P3", "Start date", "End date", "Deadline", "Parent project", "Tags", "Color", "Rename", "Archive project", "Open note", "Delete project"]);
+    expect(labels).toEqual(["P1", "P2", "P3", "Status", "Start date", "End date", "Deadline", "Parent project", "Tags", "Color", "Rename", "Archive project", "Add description", "Open note", "Delete project"]);
     menuButton("P1").click();
     expect(plugin.updateProject.mock.lastCall![0]).toBe("Site.md");
     expect(lastChange(plugin).priority).toBe("1");

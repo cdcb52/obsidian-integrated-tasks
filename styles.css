@@ -2665,3 +2665,33 @@ button.tm-options-convert, button.tm-options-update {
 button.tm-options-convert:hover, button.tm-options-convert:focus-visible,
 button.tm-options-update:not(:disabled):hover, button.tm-options-update:focus-visible { background: var(--background-modifier-hover); }
 button.tm-options-update:disabled { color: var(--text-faint); cursor: default; }
+
+/* A project's status property, beside its dates; in progress and waiting take the colours a task's status has. */
+.tm-project-status { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.tm-project-status .tm-task-detail-icon { display: inline-flex; }
+.tm-project-status .tm-task-detail-icon svg { width: var(--icon-xs); height: var(--icon-xs); }
+.tm-project-status.is-doing .tm-task-detail-icon { color: var(--text-accent); }
+.tm-project-status.is-waiting .tm-task-detail-icon { color: var(--color-orange); }
+.tm-things-trailing .tm-project-status { margin-inline-end: 8px; color: var(--text-muted); }
+
+/* A project page's description, in a card under its properties. */
+.tm-title-group:has(> div > .tm-project-description:not([hidden])),
+.tm-title-group > div:has(> .tm-project-description:not([hidden])) { flex: 1 1 auto; min-width: 0; }
+.tm-project-description {
+  margin-top: var(--size-4-3);
+  padding: var(--size-4-3) var(--size-4-4);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-medium);
+  line-height: var(--line-height-normal);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
+}
+.tm-project-description[hidden] { display: none; }
+.tm-project-description-input {
+  display: block; width: 100%; min-height: 3lh; padding: 0; border: 0; resize: none; overflow: hidden;
+  background: transparent; box-shadow: none; color: inherit; font: inherit; line-height: inherit;
+}
+.tm-project-description-input:focus, .tm-project-description-input:focus-visible { border: 0; box-shadow: none; outline: none; }

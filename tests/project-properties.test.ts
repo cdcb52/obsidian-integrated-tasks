@@ -55,3 +55,22 @@ describe("convert to project", () => {
     expect(properties.tags).toEqual(["work", "#project", "personal"]);
   });
 });
+
+describe("project status and description", () => {
+  it("reads the status as a task status, and the description's text", async () => {
+    expect(parseProjectProperties({ status: "In progress", description: "  Launch the site.\nIn spring.  " })).toMatchObject({ status: "doing", description: "Launch the site.\nIn spring." });
+    expect(parseProjectProperties({ Status: ["on hold"], Description: ["One", "Two"] })).toMatchObject({ status: "waiting", description: "One\nTwo" });
+    expect(parseProjectProperties({ status: "someday", description: "  " })).toMatchObject({ status: undefined, description: undefined });
+  });
+
+  it("writes the description under its own property name, and removes it when emptied", async () => {
+    const { setProjectDescription } = await import("../src/project-properties");
+    const frontmatter: Record<string, unknown> = { tags: ["project"], Description: "Old" };
+    setProjectDescription(frontmatter, " New \n");
+    expect(frontmatter).toEqual({ tags: ["project"], Description: "New" });
+    setProjectDescription(frontmatter, "");
+    expect(frontmatter).toEqual({ tags: ["project"] });
+    setProjectDescription(frontmatter, "Fresh");
+    expect(frontmatter).toEqual({ tags: ["project"], description: "Fresh" });
+  });
+});

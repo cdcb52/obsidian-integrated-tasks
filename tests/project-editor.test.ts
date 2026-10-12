@@ -18,3 +18,16 @@ it("rejects invalid edits without partially modifying frontmatter", () => {
   expect(() => applyProjectDraft(frontmatter, { ...draft, deadline: "garbage" }, "YYYY-MM-DD", false)).toThrow();
   expect(frontmatter).toEqual({ tags: ["project"], date: "2026-09-18", custom: "keep" });
 });
+
+it("writes a chosen status by its name, keeping the property's spelling, removes it for No status, and leaves it alone otherwise", () => {
+  const frontmatter: Record<string, unknown> = { tags: ["project"], Status: "on hold" };
+  const draft = projectEditDraft(project, frontmatter);
+  expect(draft.status).toBeUndefined();
+  applyProjectDraft(frontmatter, { ...draft, priority: "1" }, "YYYY-MM-DD", false);
+  expect(frontmatter.Status).toBe("on hold");
+  applyProjectDraft(frontmatter, { ...draft, status: "doing" }, "YYYY-MM-DD", false);
+  expect(frontmatter.Status).toBe("In progress");
+  expect(() => applyProjectDraft(frontmatter, { ...draft, status: "someday" }, "YYYY-MM-DD", false)).toThrow("valid status");
+  applyProjectDraft(frontmatter, { ...draft, status: "" }, "YYYY-MM-DD", false);
+  expect("Status" in frontmatter).toBe(false);
+});

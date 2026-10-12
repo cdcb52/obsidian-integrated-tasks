@@ -25,6 +25,8 @@ export interface ViewOptionsHost {
   convert?: (anchor: HTMLElement) => void;
   /** In a smart list: saves the options it now shows into the list; the panel's footer offers it while they differ from the list's. */
   updateSmartList?: { changed(): boolean; save(): void };
+  /** The properties the view's items have (the Projects view's), when not every task property: only these are offered. */
+  properties?: readonly TaskProperty[];
 }
 
 type Property = typeof TASK_PROPERTIES[number];
@@ -154,6 +156,8 @@ export class ViewOptionsPanel {
   private dropdown?: { element: HTMLElement; button: HTMLElement; spec: DropdownSpec; render(): void };
 
   constructor(anchor: HTMLElement, private readonly toggle: HTMLButtonElement, private readonly host: ViewOptionsHost) {
+    // Action date, None and View default apply to anything; other choices only where the items have the property.
+    const offered = (value: string): boolean => !host.properties || value === "date" || value === "default" || value === "none" || host.properties.includes(value as TaskProperty);
     toggle.empty();
     setIcon(toggle.createSpan({ cls: "tm-options-toggle-icon" }), "list-filter");
     this.badge = toggle.createSpan({ cls: "tm-options-badge", attr: { "aria-hidden": "true" } });
@@ -178,7 +182,7 @@ export class ViewOptionsPanel {
     const sortRow = this.row(sorting, "arrow-up-down", "Sort");
     this.selectButton(sortRow, "sort", "Sort", () => ({
       label: "Sort", multi: false,
-      options: () => SORTS.map(([value, label]) => ({ value, label, selected: this.host.state().sort === value })),
+      options: () => SORTS.filter(([value]) => offered(value)).map(([value, label]) => ({ value, label, selected: this.host.state().sort === value })),
       choose: value => { this.host.update({ sort: value as TaskSort }); this.sync(); this.closeDropdown(true); }
     }));
     sortRow.addClass("has-direction");
@@ -187,7 +191,7 @@ export class ViewOptionsPanel {
     const groupRow = this.row(sorting, "layers", "Group");
     this.selectButton(groupRow, "group", "Group", () => ({
       label: "Group", multi: false,
-      options: () => GROUPS.map(([value, label]) => {
+      options: () => GROUPS.filter(([value]) => offered(value)).map(([value, label]) => {
         const shown = value === "default" && this.host.state().defaultGroup ? `${label} (${this.host.state().defaultGroup})` : label;
         return { value, label: shown, selected: this.host.state().grouping === value };
       }),
@@ -206,7 +210,9 @@ export class ViewOptionsPanel {
       event.preventDefault(); switchProjects();
     });
 
-    for (const [title, rows] of SECTIONS) {
+    for (const [title, all] of SECTIONS) {
+      const rows = all.filter(([key]) => offered(key));
+      if (!rows.length) continue;
       const section = this.section(title);
       for (const [key, label, icon] of rows) {
         const property = TASK_PROPERTIES.find(item => item.key === key);

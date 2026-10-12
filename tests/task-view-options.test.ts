@@ -26,20 +26,25 @@ class Element extends EventTarget {
 
 // The view options panel itself is covered in view-options.test.ts.
 
-it.each([true, false])("lists archived projects without an opt-in checkbox (active projects: %s)", hasActive => {
+it.each([true, false])("lists archived projects in a group of their own in the Projects list (active projects: %s)", hasActive => {
   const archived = { path: "Archive.md", name: "Archive", archived: true, openTasks: 0, completedTasks: 1 };
-  const active = { ...archived, path: "Active.md", name: "Active", archived: false };
+  const active = { ...archived, path: "Active.md", name: "Active", archived: false, openTasks: 1 };
   const openProjectCreator = vi.fn();
-  const view = new TaskMainView({} as WorkspaceLeaf, { openProjectCreator, index: { projects: () => hasActive ? [active, archived] : [archived] } } as unknown as TaskManagerPlugin);
-  const internal = view as unknown as { renderProjectList(root: HTMLElement): void; renderProjectGroup(root: HTMLElement, title: string, projects: unknown[]): void };
+  const projects = hasActive ? [active, archived] : [archived];
+  const view = new TaskMainView({} as WorkspaceLeaf, { openProjectCreator, index: { projects: () => projects } } as unknown as TaskManagerPlugin);
+  const internal = view as unknown as {
+    state: { mode: string }; shownProjects: Map<string, unknown>;
+    renderProjectGroups(root: HTMLElement, items: unknown[]): void; renderProjectGroup(root: HTMLElement, title: string, projects: unknown[]): void;
+  };
+  internal.state = { mode: "projects" };
+  for (const project of projects) internal.shownProjects.set(`project:${project.path}`, project);
   const groups = vi.spyOn(internal, "renderProjectGroup").mockImplementation(() => {});
   const root = new Element();
-  internal.renderProjectList(root as never);
-  expect(groups).toHaveBeenCalledWith(root, "Archived", [archived]);
-  expect(root.all().some(el => el.tag === "label")).toBe(false);
-  const create = root.all().find(el => el.attrs["aria-label"] === "Create new project")!;
-  expect(create.text).toBe("");
-  create.dispatchEvent(new Event("click"));
+  internal.renderProjectGroups(root as never, projects.map(project => ({ id: `project:${project.path}` })));
+  expect(groups).toHaveBeenCalledWith(root, "Archived", [archived], undefined);
+  expect(groups).toHaveBeenCalledWith(root, "Active", hasActive ? [active] : [], undefined);
+  // Its add button makes a project.
+  view.newTask();
   expect(openProjectCreator).toHaveBeenCalledOnce();
 });
 

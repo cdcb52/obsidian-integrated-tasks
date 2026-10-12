@@ -394,6 +394,24 @@ it.each([false, true])("opens a real project file and reconciles task mode (alre
   expect(revealLeaf).toHaveBeenCalledExactlyOnceWith(leaf);
 });
 
+it.each([false, true])("leaves task mode as it is when the task sidebar opens a project or tag (task mode on: %s)", async enabled => {
+  const plugin = new TaskManagerPlugin({} as App, {} as never);
+  const file = Object.assign(new TFile(), { path: "Project.md" });
+  const leaf = { openFile: vi.fn().mockResolvedValue(undefined) };
+  const sync = vi.fn().mockResolvedValue(undefined);
+  plugin.app = { vault: { getAbstractFileByPath: () => file }, workspace: { getLeavesOfType: () => [], getLeaf: vi.fn(() => leaf), revealLeaf: vi.fn() } } as unknown as App;
+  (plugin as unknown as { index: unknown }).index = { tagFile: () => file };
+  plugin.settings.taskMode = enabled;
+  const mode = vi.spyOn(plugin, "setTaskMode");
+  (plugin as unknown as { taskModeController: unknown }).taskModeController = { sync };
+  await plugin.openProject(file.path, { keepTaskMode: true });
+  await plugin.openTag("work", { keepTaskMode: true });
+  expect(leaf.openFile).toHaveBeenCalledTimes(2);
+  expect(mode).not.toHaveBeenCalled();
+  expect(plugin.settings.taskMode).toBe(enabled);
+  expect(sync).toHaveBeenCalledTimes(2);
+});
+
 it("routes legacy project navigation through file opening", async () => {
   const plugin = new TaskManagerPlugin({} as App, {} as never);
   const open = vi.spyOn(plugin, "openProject").mockResolvedValue(undefined);
@@ -664,7 +682,8 @@ it("edits the task on the current editor line only when task mode is off", () =>
  it.each([
    [{ mode: "all", layout: "list" }, false],
    [{ mode: "all", layout: "kanban" }, false],
-   [{ mode: "projects", layout: "calendar" }, false],
+   [{ mode: "projects", layout: "calendar" }, true],
+   [{ mode: "projects", layout: "calendar", projectLayout: "gantt" }, false],
    [{ mode: "projects", pagePath: "Project.md", layout: "calendar" }, true],
    [{ mode: "tags", layout: "calendar" }, false],
    [{ mode: "tags", tag: "work", layout: "calendar" }, true],

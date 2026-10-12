@@ -32,7 +32,7 @@ import { TASK_QUERY_LANGUAGE, TASK_QUERY_TEMPLATE, TaskQueryBlock } from "./task
 import { TaskMainView, TASK_MAIN_VIEW, tasksOpenInSidebar } from "./task-view";
 import { DEFAULT_SETTINGS, type Project, type SavedViewOptions, type SmartList, type ViewLayout, type ViewPeriod, type Task, type TaskDraft, type TaskManagerSettings, type TaskViewMode, type TaskViewState } from "./types";
 import { TaskManagerSettingTab } from "./settings";
-import { addProjectProperties } from "./project-properties";
+import { addProjectProperties, setProjectDescription } from "./project-properties";
 import { dailyNoteDateFormat } from "./daily-notes";
 import { TaskQuickSwitcher } from "./quick-switcher";
 import { TaskSidebarView, TASK_SIDEBAR_VIEW } from "./task-sidebar";
@@ -564,6 +564,14 @@ export default class TaskManagerPlugin extends Plugin {
     return file.path;
   }
 
+  /** Writes a project's description property; empty text removes it. */
+  async setProjectDescription(path: string, text: string): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) throw new Error("Project note no longer exists.");
+    await this.store.updateFrontmatter(file, (frontmatter: Record<string, unknown>) => setProjectDescription(frontmatter, text), "Changed the project's description");
+    await this.index.refreshPath(file);
+  }
+
   /** Moves a project's note, and so its tasks, to the trash (the vault's or the system's, per Obsidian's setting). */
   async deleteProject(path: string): Promise<void> {
     const file = this.app.vault.getAbstractFileByPath(path);
@@ -571,12 +579,16 @@ export default class TaskManagerPlugin extends Plugin {
     await this.app.fileManager.trashFile(file);
   }
 
-  async openProject(path: string): Promise<void> {
+  /**
+   * Opens a project's note as its task view, turning task mode on; `keepTaskMode` (the task sidebar's lists) leaves
+   * task mode as it is, so with it off the note opens as a note.
+   */
+  async openProject(path: string, { keepTaskMode = false } = {}): Promise<void> {
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!(file instanceof TFile)) throw new Error("Project note no longer exists.");
     const leaf = this.app.workspace.getLeaf("tab");
     await leaf.openFile(file);
-    if (!this.settings.taskMode) await this.setTaskMode(true);
+    if (!this.settings.taskMode && !keepTaskMode) await this.setTaskMode(true);
     else await this.taskModeController?.sync();
     await this.app.workspace.revealLeaf(leaf);
     for (const navLeaf of this.app.workspace.getLeavesOfType(TASK_NAV_VIEW)) {
@@ -584,12 +596,13 @@ export default class TaskManagerPlugin extends Plugin {
     }
   }
 
-  async openTag(tag: string): Promise<void> {
+  /** Opens a tag's view, or its note as one (turning task mode on unless `keepTaskMode`, as for a project). */
+  async openTag(tag: string, { keepTaskMode = false } = {}): Promise<void> {
     const file = this.index.tagFile(tag);
     if (!file) return this.openTaskView({ mode: "tags", tag });
     const leaf = this.app.workspace.getLeaf("tab");
     await leaf.openFile(file);
-    if (!this.settings.taskMode) await this.setTaskMode(true);
+    if (!this.settings.taskMode && !keepTaskMode) await this.setTaskMode(true);
     else await this.taskModeController?.sync();
     await this.app.workspace.revealLeaf(leaf);
     for (const navLeaf of this.app.workspace.getLeavesOfType(TASK_NAV_VIEW)) {

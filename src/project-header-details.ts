@@ -1,6 +1,6 @@
 import { setIcon } from "obsidian";
 import { formatDate, todayIso } from "./date";
-import { thingsDeadlineLabel } from "./things-row-details";
+import { renderProjectStatus, thingsDeadlineLabel } from "./things-row-details";
 import { longDate } from "./things-task-card";
 import { deadlineIsDistant, deadlineIsOverdue, taskDeadlineLabel, taskDoneDateLabel, taskTimeLabel } from "./task-row-details";
 import type { ProjectDraft } from "./project-creator";
@@ -11,6 +11,7 @@ export const projectDateLabel = taskDoneDateLabel;
 
 /** `showParent`: the parent project, shown on a project's page but not in the Projects list. */
 export function renderProjectHeaderDetails(parent: HTMLElement, project: Project, edit: (field: keyof ProjectDraft) => void, dateFormat: string, now = new Date(), deadlineParent = parent, things = false, showParent = true): void {
+    renderProjectStatus(parent, project, edit);
     if (things) renderThingsProjectDates(parent, project, edit, dateFormat, now);
     else if (project.scheduledDate || project.endDate) {
         const range = parent.createSpan({ cls: "tm-project-date-range" });

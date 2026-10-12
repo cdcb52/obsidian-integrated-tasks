@@ -32,6 +32,7 @@ async function setup(notes: Array<[string, string]>, frontmatter: Record<string,
   const plugin = {
     settings, index, store: {}, dateFormat: () => "YYYY-MM-DD", openEditor: vi.fn(), openTaskView: vi.fn().mockResolvedValue(undefined),
     projectDraft: vi.fn(() => ({ tags: "" })),
+    updateProject: vi.fn().mockResolvedValue(""), setProjectDescription: vi.fn().mockResolvedValue(undefined), openProjectCreator: vi.fn(),
     saveViewOptions: vi.fn((key: string, options?: SavedViewOptions) => { if (options) settings.viewOptions[key] = options; else delete settings.viewOptions[key]; }),
     saveViewLayout: vi.fn((key: string, layout?: ViewLayout) => { if (layout && layout !== "list") settings.viewLayouts[key] = layout; else delete settings.viewLayouts[key]; }),
     saveViewPeriod: vi.fn((key: string, period?: ViewPeriod) => { if (period && Object.keys(period).length) settings.viewPeriods[key] = period; else delete settings.viewPeriods[key]; }),
@@ -106,7 +107,7 @@ describe("Layouts kept for each view", () => {
     expect(view.getState().layout).toBe("list");
     layoutButton("layout-kanban").click();
     await view.setState({ mode: "projects" });
-    layoutButton("project-layout-gantt").click();
+    layoutButton("layout-gantt").click();
     await view.setState({ mode: "smartLists", smartListId: "p1" });
     layoutButton("layout-calendar").click();
     expect(settings.viewLayouts).toEqual({ today: "calendar", upcoming: "kanban", projects: "gantt", "smartList:p1": "calendar" });
@@ -123,6 +124,73 @@ describe("Layouts kept for each view", () => {
     // Back to a list, nothing is kept.
     layoutButton("layout-list").click();
     expect(settings.viewLayouts.upcoming).toBeUndefined();
+  });
+});
+
+describe("The Projects view", () => {
+  const projects = (): Array<[string, string]> => [["Site.md", "- [ ] Page"], ["Home.md", "- [ ] Paint"], ["Garden.md", "- [x] Dig"], ["Old.md", "- [ ] Box"]];
+  const frontmatter = {
+    "Site.md": { tags: ["project"], status: "In progress", priority: 1 },
+    "Home.md": { tags: ["project"], status: "on hold" },
+    "Garden.md": { tags: ["project"] },
+    "Old.md": { tags: ["project", "archived"] }
+  };
+  const sections = (content: HTMLElement) => Array.from(content.querySelectorAll(".tm-section, .tm-kanban-column")).map(section => [
+    section.querySelector("h2")!.firstChild!.textContent, Array.from(section.querySelectorAll(".tm-task-title")).map(title => title.textContent)
+  ]);
+
+  it("lists projects as before by View default, and boards them by their status property", async () => {
+    const { view, plugin, settings, content } = await setup(projects(), frontmatter);
+    await view.setState({ mode: "projects" });
+    // A status property says whether a project is done; without one, its tasks do.
+    expect(sections(content())).toEqual([["Active", ["Home", "Site"]], ["Completed", ["Garden"]], ["Archived", ["Old"]]]);
+    expect(Array.from(content().querySelectorAll(".tm-project-status")).map(status => status.textContent)).toEqual(["Waiting", "In progress"]);
+    const button = (key: string) => content().querySelector<HTMLButtonElement>(`[data-tm-focus-key="${key}"]`)!;
+    expect(["layout-list", "layout-calendar", "layout-kanban", "layout-gantt"].every(key => button(key))).toBe(true);
+    button("layout-kanban").click();
+    expect(settings.viewLayouts.projects).toBe("kanban");
+    expect(sections(content())).toEqual([["To do", []], ["In progress", ["Site"]], ["Waiting", ["Home"]], ["Done", ["Garden"]], ["Cancelled", []]]);
+    // Dropped in a column, a project takes its status.
+    const internal = view as unknown as { dropListTask(task: unknown, group: unknown): Promise<void> };
+    await internal.dropListTask({ id: "project:Home.md" }, { property: "status", value: "Done" });
+    expect(plugin.updateProject).toHaveBeenCalledOnce();
+    const [path, change] = plugin.updateProject.mock.calls[0] as [string, (draft: Record<string, unknown>) => Record<string, unknown>];
+    expect(path).toBe("Home.md");
+    expect(change({ name: "Home" })).toEqual({ name: "Home", status: "done" });
+    button("layout-gantt").click();
+    expect(settings.viewLayouts.projects).toBe("gantt");
+    expect(content().querySelectorAll(".tm-gantt-project")).toHaveLength(4);
+  });
+
+  it("filters projects with View options limited to a project's properties, kept for the view", async () => {
+    const { view, settings, content } = await setup(projects(), frontmatter);
+    await view.setState({ mode: "projects" });
+    content().querySelector<HTMLButtonElement>(".tm-filter-toggle")!.click();
+    expect(content().querySelector("[data-tm-focus-key='option-status']")).not.toBeNull();
+    expect(content().querySelector("[data-tm-focus-key='option-repeat']")).toBeNull();
+    expect(content().querySelector("[data-tm-focus-key='option-convert']")).toBeNull();
+    content().querySelector<HTMLButtonElement>("[data-tm-focus-key='option-priority']")!.click();
+    content().querySelector<HTMLElement>(".tm-options-dropdown [data-value='1']")!.click();
+    expect(sections(content())).toEqual([["Active", ["Site"]]]);
+    expect(settings.viewOptions.projects?.filters).toEqual([{ property: "priority", operator: "is", values: ["1"] }]);
+  });
+
+  it("shows a project's description in a card on its page, edited in place", async () => {
+    const { view, plugin, content } = await setup(projects(), { ...frontmatter, "Site.md": { ...frontmatter["Site.md"], description: "The new website.\nLaunch in spring." } });
+    await view.setState({ mode: "all", pagePath: "Site.md" });
+    const card = () => content().querySelector<HTMLElement>(".tm-project-description")!;
+    expect(card().hidden).toBe(false);
+    expect(card().textContent).toBe("The new website.\nLaunch in spring.");
+    card().click();
+    const field = card().querySelector("textarea")!;
+    expect(field.value).toBe("The new website.\nLaunch in spring.");
+    field.value = "The new website.";
+    field.dispatchEvent(new FocusEvent("blur"));
+    expect(plugin.setProjectDescription).toHaveBeenCalledExactlyOnceWith("Site.md", "The new website.");
+    expect(card().textContent).toBe("The new website.");
+    // Without one, there is no card.
+    await view.setState({ mode: "all", pagePath: "Home.md" });
+    expect(card().hidden).toBe(true);
   });
 });
 
@@ -144,7 +212,7 @@ describe("Calendar scope and Gantt range kept for each view", () => {
     expect(settings.viewPeriods.today).toBeUndefined();
 
     await view.setState({ mode: "projects" });
-    content().querySelector<HTMLButtonElement>('[data-tm-focus-key="project-layout-gantt"]')!.click();
+    content().querySelector<HTMLButtonElement>('[data-tm-focus-key="layout-gantt"]')!.click();
     content().querySelector<HTMLButtonElement>('.tm-gantt-zoom button[aria-label="Zoom in"]')!.click();
     const range = settings.viewPeriods.projects;
     expect(range?.ganttScale ?? range?.ganttZoom).toBeDefined();

@@ -22,6 +22,8 @@ interface GanttOptions {
   zoomed?: (anchor: string, zoom: GanttZoom, scale: number) => void;
   open: (project: Project) => void;
   edit?: (project: Project, field: keyof ProjectDraft) => void;
+  /** A right-click on a project's row: its actions, at the pointer, beside its title. */
+  menu?: (project: Project, at: { x: number; y: number }, anchor: HTMLElement) => void;
   update: (project: Project, changes: Partial<Record<ProjectDateField, string>>) => Promise<void>;
   /** Draw deadlines as the Things style does ("N days left"), rather than as a pill. */
   things?: boolean;
@@ -130,12 +132,21 @@ export function renderGantt(container: HTMLElement, options: GanttOptions): void
       zoomBy(factor, wheelAt);
     });
   }, { passive: false });
-  // Dragging with the right mouse button pans the timeline, across and down.
-  let pan: { id: number; x: number; y: number } | undefined;
+  // Dragging with the right mouse button pans the timeline, across and down; a right-click that stays put opens the
+  // project's actions, as in the Projects list.
+  let pan: { id: number; x: number; y: number; startX: number; startY: number; row?: HTMLElement } | undefined;
+  const rowProjects = new WeakMap<HTMLElement, { project: Project; title: HTMLElement }>();
+  const openMenu = (row: HTMLElement | null | undefined, x: number, y: number): boolean => {
+    const entry = row ? rowProjects.get(row) : undefined;
+    if (!entry || !options.menu) return false;
+    options.menu(entry.project, { x, y }, entry.title);
+    return true;
+  };
   scroll.addEventListener("pointerdown", event => {
     if (event.button !== 2) return;
     event.preventDefault();
-    pan = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    pan = { id: event.pointerId, x: event.clientX, y: event.clientY, startX: event.clientX, startY: event.clientY,
+      row: (event.target as HTMLElement | null)?.closest?.<HTMLElement>(".tm-gantt-row") ?? undefined };
     scroll.setPointerCapture(event.pointerId);
     scroll.addClass("is-panning");
   });
@@ -148,12 +159,20 @@ export function renderGantt(container: HTMLElement, options: GanttOptions): void
   });
   const endPan = (event: PointerEvent): void => {
     if (pan?.id !== event.pointerId) return;
+    const ended = pan;
     pan = undefined;
     scroll.removeClass("is-panning");
+    if (event.type === "pointerup" && Math.hypot(event.clientX - ended.startX, event.clientY - ended.startY) < 4) openMenu(ended.row, event.clientX, event.clientY);
   };
   for (const type of ["pointerup", "pointercancel", "lostpointercapture"] as const) scroll.addEventListener(type, endPan);
-  // The right button pans here; the timeline has no menu of its own.
-  scroll.addEventListener("contextmenu", event => event.preventDefault());
+  // The right button's own menu waits for its release (above); Ctrl-click and the menu key open the actions at once.
+  scroll.addEventListener("contextmenu", event => {
+    event.preventDefault();
+    if (pan || event.button === 2) return;
+    const target = event.target as HTMLElement | null;
+    const rect = target?.getBoundingClientRect();
+    openMenu(target?.closest?.<HTMLElement>(".tm-gantt-row"), event.clientX || rect?.left || 0, event.clientY || rect?.bottom || 0);
+  });
   // With the timeline focused, + and - zoom in and out.
   scroll.addEventListener("keydown", event => {
     if (event.target !== scroll || event.ctrlKey || event.metaKey || event.altKey) return;
@@ -219,6 +238,7 @@ export function renderGantt(container: HTMLElement, options: GanttOptions): void
     const content = label.createDiv({ cls: "tm-gantt-project-content" });
     const title = content.createEl("button", { cls: "tm-task-title", text: project.name, attr: { title: project.path, "aria-label": `Open ${project.name} project note` } });
     title.addEventListener("click", () => options.open(project));
+    rowProjects.set(row, { project, title });
     const metadata = content.createDiv({ cls: "tm-project-header-metadata" });
     const paintDetails = (): void => {
       metadata.empty();

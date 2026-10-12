@@ -1,5 +1,6 @@
 import type { ProjectDateField } from "./gantt";
 import { formatDate, parseStrictDateExpression } from "./date";
+import { statusFromLabel } from "./task-status";
 import type { Priority, ProjectProperties } from "./types";
 
 export const PROJECT_COLORS = ["red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink", "gray"] as const;
@@ -40,8 +41,24 @@ export function parseProjectProperties(frontmatter: Record<string, unknown> | un
     endDate: date(values.get("enddate")),
     deadline: date(values.get("deadline")),
     priority: rawPriority && Object.prototype.hasOwnProperty.call(priorities, rawPriority) ? priorities[rawPriority] : undefined,
-    color: projectColorValue(values.get("color") ?? values.get("colour"))
+    color: projectColorValue(values.get("color") ?? values.get("colour")),
+    status: statusFromLabel(scalar(values.get("status")) ?? ""),
+    description: projectDescription(values.get("description"))
   };
+}
+
+/** A `description` property's text: a string, or a list of lines; blank is none. */
+export function projectDescription(raw: unknown): string | undefined {
+  const text = Array.isArray(raw) ? raw.filter((line): line is string => typeof line === "string").join("\n") : typeof raw === "string" ? raw : undefined;
+  return text?.trim() ? text.trim() : undefined;
+}
+
+/** Writes a project's description, keeping the property's name; empty text removes it. */
+export function setProjectDescription(frontmatter: Record<string, unknown>, text: string): void {
+  const keys = Object.keys(frontmatter).filter(key => key.toLowerCase().replace(/[\s_-]/g, "") === "description");
+  const value = text.trim();
+  if (!value) { for (const key of keys) delete frontmatter[key]; return; }
+  for (const key of keys.length ? keys : ["description"]) frontmatter[key] = value;
 }
 
 /** Add editable project fields without replacing existing values or aliases. */

@@ -5,7 +5,7 @@ import type { Project } from "./types";
 const propertyAliases: Record<string, string[]> = {
   date: ["date", "startdate", "scheduleddate"],
   "end date": ["enddate"], deadline: ["deadline"], priority: ["priority"], parent: ["parent"], tags: ["tags"],
-  color: ["color", "colour"]
+  color: ["color", "colour"], status: ["status"]
 };
 const normalize = (key: string): string => key.toLowerCase().replace(/[\s_-]/g, "");
 
@@ -30,13 +30,16 @@ export function projectEditDraft(project: Project, frontmatter: Record<string, u
     archived: project.archived,
     // An unrecognised value stays as it is unless another colour is chosen.
     color: value("color") === undefined ? "" : projectColorName(value("color"))
+    // No status: it stays as written (any spelling, or one not recognised) unless another is chosen.
   };
 }
 
 /** Update only known project fields, retaining custom properties and existing property names. */
 export function applyProjectDraft(frontmatter: Record<string, unknown>, draft: ProjectDraft, dateFormat: string, linkDates: boolean): void {
   const values = projectDraftProperties(draft, dateFormat, linkDates);
-  if (draft.color === "") for (const key of Object.keys(frontmatter)) if (propertyAliases.color.includes(normalize(key))) delete frontmatter[key];
+  for (const property of ["color", "status"] as const) {
+    if (draft[property] === "") for (const key of Object.keys(frontmatter)) if (propertyAliases[property].includes(normalize(key))) delete frontmatter[key];
+  }
   for (const [property, value] of Object.entries(values)) {
     const keys = Object.keys(frontmatter).filter(key => propertyAliases[property].includes(normalize(key)));
     for (const key of keys.length ? keys : [property]) frontmatter[key] = value;

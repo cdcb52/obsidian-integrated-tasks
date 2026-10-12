@@ -34,7 +34,7 @@ import { ListDragController } from "./list-drag-view";
 import { draftForGroup, isStructuralGroup, taskGroupTarget, type ListDropGroup, type ListPlacement } from "./list-drag";
 import { renderCalendar } from "./calendar-view";
 import { addDays, daysBetween, rescheduledDraft, type CalendarScope } from "./calendar";
-import { STATUS_ICONS, STATUS_LABELS, TASK_STATUSES, isClosedStatus } from "./task-status";
+import { STATUS_ICONS, STATUS_LABELS, TASK_STATUSES, isClosedStatus, statusFromLabel } from "./task-status";
 import { ItemView, Menu, Notice, Platform, setIcon, TFile, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
 import { actionDate, formatDate, parseDateExpression, todayIso } from "./date";
 import { groupTasks, orderTaskTree, sortTasks, taskMatchesQuery } from "./query";
@@ -82,8 +82,10 @@ const TITLES: Record<TaskViewMode, string> = {
  * start while still ahead (once started, it is no longer waiting on a date), its deadline, priority and tags.
  */
 function projectAsTask(project: Project, tags: string[], today: string, completed = false, calendar = false): Task {
+  // Its status property, else done once completed; a status that disagrees with whether it is done gives way.
+  const status = project.status && isClosedStatus(project.status) === completed ? project.status : completed ? "done" : "todo";
   return {
-    id: `project:${project.path}`, path: project.path, title: project.name, status: completed ? "done" : "todo", completed,
+    id: `project:${project.path}`, path: project.path, title: project.name, status, completed,
     line: 0, endLine: 0, raw: "", indent: 0, childIds: [],
     // Lists date a project by a start still to come; the calendar shows it on its start, past or not.
     scheduledDate: project.scheduledDate && (calendar || project.scheduledDate >= today) ? project.scheduledDate : undefined,
@@ -91,6 +93,9 @@ function projectAsTask(project: Project, tags: string[], today: string, complete
     tags: tags.filter(tag => tag !== "project")
   };
 }
+
+/** What the Projects view's View options filter, sort and group by: the properties a project has. */
+const PROJECT_PROPERTIES: readonly TaskProperty[] = ["status", "priority", "scheduledDate", "deadline", "tags", "title"];
 
 /**
  * A page's title, looking as a note's inline title does in the theme: the heading sits at the note text size, so
@@ -161,6 +166,8 @@ export class TaskMainView extends ItemView {
   private closed = false;
   private preserving = false;
   private headerMetadata?: HTMLElement;
+  /** A project page's description, in a card under its properties. */
+  private headerDescription?: HTMLElement;
   private liveRegion?: HTMLElement;
   /** A moved task gets a new id (its line changes); focus it again by note and title. */
   private pendingFocus?: { path: string; title: string };
@@ -181,9 +188,15 @@ export class TaskMainView extends ItemView {
 
   get pagePath(): string | undefined { return this.state.pagePath ?? this.state.projectPath; }
 
+  /** The Projects view itself (not a project's page), which lists projects in place of tasks. */
+  private get isProjectsView(): boolean { return this.state.mode === "projects" && !this.pagePath; }
+
+  /** The Projects view in its Gantt layout. */
+  private get isGantt(): boolean { return this.isProjectsView && this.projectLayout === "gantt"; }
+
   get hasCalendar(): boolean {
     if (this.layout !== "calendar") return false;
-    if (this.state.mode === "projects" && !this.pagePath) return false;
+    if (this.isGantt) return false;
     if (this.state.mode === "tags" && !this.state.tag) return false;
     if (this.state.mode === "smartLists" && !this.plugin.settings.smartLists.some(list => list.id === this.state.smartListId)) return false;
     return true;
@@ -208,7 +221,7 @@ export class TaskMainView extends ItemView {
     const { mode, tag } = this.state;
     if (this.pagePath) return `${mode === "tags" ? "tag" : "project"}:${this.pagePath}`;
     if (mode === "tags") return tag ? `tag:${tag}` : undefined;
-    return mode === "inbox" || mode === "today" || mode === "upcoming" || mode === "all" ? mode : undefined;
+    return mode === "inbox" || mode === "today" || mode === "upcoming" || mode === "all" || mode === "projects" ? mode : undefined;
   }
 
   /** The page's kept View options, or the defaults. */
@@ -251,7 +264,7 @@ export class TaskMainView extends ItemView {
   /** Keeps the page's layout for its next visit. */
   private saveLayout(): void {
     const key = this.layoutKey;
-    if (key) this.plugin.saveViewLayout?.(key, key === "projects" ? this.projectLayout : this.layout);
+    if (key) this.plugin.saveViewLayout?.(key, key === "projects" && this.projectLayout === "gantt" ? "gantt" : this.layout);
   }
 
   /**
@@ -508,14 +521,15 @@ export class TaskMainView extends ItemView {
     this.resetRows();
     this.taskResults = undefined;
     this.headerMetadata = undefined;
+    this.headerDescription = undefined;
     this.viewOptions = undefined;
     this.liveRegion = container.createDiv({ cls: "tm-sr-only", attr: { "aria-live": "polite" } });
     container.addClass("tm-main-view");
     container.classList.toggle("tm-density-compact", this.plugin.settings.density === "compact");
     container.classList.toggle("tm-style-things", this.plugin.settings.style === "things");
     container.classList.toggle("tm-style-griply", this.plugin.settings.style === "griply");
-    container.classList.toggle("is-calendar-view", this.layout === "calendar" && (this.state.mode !== "projects" || Boolean(this.pagePath)));
-    container.classList.toggle("is-kanban-view", this.layout === "kanban" && (this.state.mode !== "projects" || Boolean(this.pagePath)));
+    container.classList.toggle("is-calendar-view", this.layout === "calendar" && !this.isGantt);
+    container.classList.toggle("is-kanban-view", this.layout === "kanban" && !this.isGantt);
     if (this.state.mode === "smartLists" && !this.state.smartListId) {
       container.classList.remove("is-calendar-view", "is-kanban-view");
       this.renderSmartLists(container);
@@ -530,11 +544,6 @@ export class TaskMainView extends ItemView {
       this.renderTagList(container);
       return;
     }
-    if (this.state.mode === "projects" && !this.pagePath) {
-      this.renderProjectList(container);
-      return;
-    }
-
     const viewOptions = this.renderHeader(container);
     this.renderFilters(container, viewOptions);
     this.taskResults = container.createDiv({ cls: "tm-task-results" });
@@ -593,7 +602,9 @@ export class TaskMainView extends ItemView {
     this.resetRows();
     this.updateSelection();
     this.listDrag?.dispose();
-    this.listDrag = new ListDragController(id => this.plugin.index.taskById(id), (id, group, anchor, placement) => this.dropListTask(id, group, anchor, placement), this.layout !== "kanban", task => this.prepareDrag(task));
+    this.listDrag = new ListDragController(id => this.plugin.index.taskById(id), (id, group, anchor, placement) => this.dropListTask(id, group, anchor, placement), this.layout !== "kanban",
+      // A project moves between the board's columns only, not to other panes' lists.
+      task => { if (!this.shownProjects.has(task.id)) return this.prepareDrag(task); this.draggedTasks = [task]; return [task]; });
     this.listDrag.onIdle = () => {
       if (!this.renderAfterDrag) return;
       this.renderAfterDrag = false;
@@ -602,10 +613,12 @@ export class TaskMainView extends ItemView {
     const query = this.baseQuery();
     // A new task's card shows where the task would go, among the rest.
     const entry = this.newTaskEntry?.host === "card" ? [this.newTaskEntry.task] : [];
-    const tasks = sortTasks([...this.plugin.index.query(query), ...this.projectItems(query), ...entry], this.sort, this.descending);
+    // The Projects view lists projects alone.
+    const tasks = sortTasks(this.isProjectsView ? this.projectItems(query) : [...this.plugin.index.query(query), ...this.projectItems(query), ...entry], this.sort, this.descending);
+    if (this.isGantt) { this.renderProjectGantt(container, tasks); return; }
     this.selection.retain(tasks);
-    // In the calendar, its days and hours take them instead.
-    this.takeDropsFromOtherPanes(container);
+    // In the calendar, its days and hours take them instead; the Projects view takes no tasks.
+    if (!this.isProjectsView) this.takeDropsFromOtherPanes(container);
     this.renderTaskLayouts(container, tasks);
     this.selection.retain(this.visibleTasks);
     this.updateSelection();
@@ -638,20 +651,24 @@ export class TaskMainView extends ItemView {
    */
   private projectItems(query: TaskQuery): Task[] {
     this.shownProjects.clear();
-    if (!this.showProjects) return [];
-    const calendar = this.layout === "calendar";
+    const all = this.isProjectsView;
+    if (!this.showProjects && !all) return [];
+    const calendar = this.layout === "calendar" && !this.isGantt;
     const today = todayIso();
     const page = this.taskSourcePath;
-    const scope: TaskQuery = page ? { ...query, mode: "all", projectPath: undefined } : query;
+    // The Projects view lists completed projects too (a status filter narrows them), and archived ones where they
+    // have a place of their own: the list's Archived group and the Gantt.
+    const scope: TaskQuery = all ? { ...query, mode: "all", showCompleted: true } : page ? { ...query, mode: "all", projectPath: undefined } : query;
+    const archived = all && (this.isGantt || (this.layout === "list" && this.grouping === "default"));
     const items: Task[] = [];
     const projects = this.plugin.index.projects();
     const statuses = projectStatuses(projects);
     for (const project of projects) {
       // Completed projects show as completed tasks do, only with Show completed on.
       const status = statuses.get(project.path);
-      if (status === "archived" || (status === "completed" && !query.showCompleted) || project.path === page || (page !== undefined && project.parentPath !== page)) continue;
+      if ((status === "archived" && !archived) || (status === "completed" && !scope.showCompleted) || project.path === page || (page !== undefined && project.parentPath !== page)) continue;
       const tags = this.plugin.projectDraft(project).tags.split(/,\s*/).filter(Boolean);
-      const item = projectAsTask(project, tags, today, status === "completed", calendar);
+      const item = projectAsTask(project, tags, today, status !== "active", calendar);
       // The calendar shows a project on its start date, or its deadline; one with neither has no day.
       if (calendar && !item.scheduledDate && !item.deadline) continue;
       if (scope.tagPath && !this.plugin.index.taskHasTagPath(item, scope.tagPath)) continue;
@@ -660,6 +677,14 @@ export class TaskMainView extends ItemView {
       items.push(item);
     }
     return items;
+  }
+
+  /** Every project as the Projects view lists it, for View options' choices (its tags…). */
+  private allProjectItems(): Task[] {
+    const today = todayIso();
+    const projects = this.plugin.index.projects();
+    const statuses = projectStatuses(projects);
+    return projects.map(project => projectAsTask(project, this.plugin.projectDraft(project).tags.split(/,\s*/).filter(Boolean), today, statuses.get(project.path) !== "active"));
   }
 
   private renderTaskLayouts(container: HTMLElement, tasks: Task[]): void {
@@ -724,6 +749,10 @@ export class TaskMainView extends ItemView {
       }
       return;
     }
+    if (this.isProjectsView) {
+      this.renderProjectGroups(container, tasks);
+      return;
+    }
     const defaults = this.defaults;
     if (defaults.path) {
       this.renderProjectSections(container, defaults.path, tasks);
@@ -752,6 +781,8 @@ export class TaskMainView extends ItemView {
    */
   private kanbanColumns(tasks: Task[]): KanbanColumn[] {
     if (this.grouping !== "default") return kanbanColumns(tasks, this.grouping);
+    // Projects go by their status.
+    if (this.isProjectsView) return kanbanColumns(tasks, "status");
     const defaults = this.defaults;
     if (defaults.path) {
       // Subprojects are a column of their own, before the note's sections.
@@ -851,17 +882,32 @@ export class TaskMainView extends ItemView {
       more.addEventListener("click", event => { event.stopPropagation(); this.openSmartListMenu(smartList, more); });
     }
     this.headerMetadata = heading.createDiv({ cls: "tm-task-metadata tm-project-metadata tm-project-header-metadata" });
+    this.headerDescription = heading.createDiv({ cls: "tm-project-description" });
     this.renderHeaderMetadata();
 
     const actions = header.createDiv({ cls: "tm-header-actions" });
-    const layouts = actions.createDiv({ cls: "tm-layout-controls", attr: { "aria-label": "Task view layout" } });
-    for (const [layout, icon, label] of [["list", "list", "List"], ["calendar", "calendar-days", "Calendar"], ["kanban", "columns-3", "Kanban"]] as const) {
-      const button = layouts.createEl("button", { cls: "clickable-icon", attr: { "aria-label": `${label} view`, title: `${label} view`, "aria-pressed": String(this.layout === layout), "data-tm-focus-key": `layout-${layout}` } });
+    const projects = this.isProjectsView;
+    const layouts = actions.createDiv({ cls: "tm-layout-controls", attr: { "aria-label": projects ? "Projects layout" : "Task view layout" } });
+    // The Projects view has a Gantt as well.
+    for (const [layout, icon, label] of [["list", "list", "List"], ["calendar", "calendar-days", "Calendar"], ["kanban", "columns-3", "Kanban"], ...projects ? [["gantt", "chart-gantt", "Gantt"] as const] : []] as const) {
+      const pressed = layout === "gantt" ? this.isGantt : this.layout === layout && !this.isGantt;
+      const button = layouts.createEl("button", { cls: "clickable-icon", attr: { "aria-label": `${label} view`, title: `${label} view`, "aria-pressed": String(pressed), "data-tm-focus-key": `layout-${layout}` } });
       setIcon(button, icon);
-      button.addEventListener("click", () => { this.layout = layout; this.saveLayout(); this.render(); });
+      button.addEventListener("click", () => {
+        if (layout === "gantt") {
+          // The Gantt opens at the start of the year, for an overview of it.
+          if (!this.isGantt) this.ganttAnchor = ganttYearStart(todayIso());
+          this.projectLayout = "gantt";
+        } else {
+          this.layout = layout;
+          this.projectLayout = "list";
+        }
+        this.saveLayout(); this.render();
+      });
     }
     const toggle = actions.createEl("button", { cls: "tm-filter-toggle clickable-icon", attr: { "aria-label": "View options: filter, sort, and group", "data-tm-focus-key": "view-options" } });
-    const add = actions.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "Add task", title: "Add task", "data-tm-focus-key": "add-task" } });
+    const addLabel = projects ? "Create new project" : "Add task";
+    const add = actions.createEl("button", { cls: "clickable-icon", attr: { "aria-label": addLabel, title: addLabel, "data-tm-focus-key": "add-task" } });
     const icon = add.createSpan();
     setIcon(icon, "plus");
     add.addEventListener("click", () => this.newTask());
@@ -875,6 +921,8 @@ export class TaskMainView extends ItemView {
    * details › Three panes), it opens in the Task Details sidebar instead, its title empty to type.
    */
   newTask(preset?: TaskEditorPreset): void {
+    // The Projects view makes projects.
+    if (this.isProjectsView) { this.plugin.openProjectCreator(); return; }
     const state = preset ? { ...this.state, preset } : this.state;
     if (this.detailsInSidebar) { void this.startNewTask(state, "sidebar"); return; }
     // Lists and boards show a card in place; the calendar has no room for one.
@@ -1023,6 +1071,7 @@ export class TaskMainView extends ItemView {
       entries: [
         { kind: "icons", label: "Priority", key: "p", buttons: priorityIcons(project.priority, priority => this.updateProject(project, draft => ({ ...draft, priority: priority ? String(priority) : "" }))) },
         { kind: "separator" },
+        { kind: "submenu", label: "Status", icon: project.status ? STATUS_ICONS[project.status] : "circle-dashed", key: "s", open: beside("status") },
         { kind: "submenu", label: "Start date", icon: "calendar", key: "d", open: beside("date") },
         { kind: "submenu", label: "End date", icon: "calendar-check", key: "e", open: beside("endDate") },
         { kind: "submenu", label: "Deadline", icon: "flag", key: "D", open: beside("deadline") },
@@ -1033,6 +1082,9 @@ export class TaskMainView extends ItemView {
         { kind: "separator" },
         { kind: "item", label: project.archived ? "Unarchive project" : "Archive project", icon: project.archived ? "archive-restore" : "archive",
           run: () => this.updateProject(project, draft => ({ ...draft, archived: !project.archived })) },
+        // The description shows, and is edited, on the project's own page.
+        ...this.taskSourcePath === project.path && this.headerDescription ? [{ kind: "item" as const, label: project.description ? "Edit description" : "Add description", icon: "align-left",
+          run: () => this.editDescription(project) }] : [],
         { kind: "item", label: "Open note", icon: "file-text", run: () => {
           const file = this.app.vault.getAbstractFileByPath(project.path);
           if (file instanceof TFile) void this.app.workspace.getLeaf("tab").openFile(file);
@@ -1118,6 +1170,10 @@ export class TaskMainView extends ItemView {
       });
     } else if (property === "priority") {
       openChoicePopover({ anchor, beside, label: "Priority", choices: PRIORITY_CHOICES, cycleKey: "p", selected: current.priority, choose: value => save(draft => ({ ...draft, priority: value })) });
+    } else if (property === "status") {
+      const choices: Choice[] = TASK_STATUSES.map(status => ({ value: status, label: STATUS_LABELS[status], icon: STATUS_ICONS[status] }));
+      choices.push({ value: "", label: "No status", separated: true });
+      openChoicePopover({ anchor, beside, label: "Status", choices, cycleKey: "s", selected: project.status ?? "", choose: value => save(draft => ({ ...draft, status: value })) });
     } else if (property === "parent") {
       // Not the project itself, nor one of its subprojects: a project cannot sit inside itself.
       const projects = this.plugin.index.projects();
@@ -1170,6 +1226,7 @@ export class TaskMainView extends ItemView {
     metadata.empty();
     const project = this.taskSourcePath ? this.plugin.index.projects().find(project => project.path === this.taskSourcePath) : undefined;
     metadata.hidden = !project;
+    this.renderHeaderDescription(project);
     if (!project) return;
     // The header's source label names the parent project, so it takes the parent's colour.
     const parentColor = project.parentPath ? this.plugin.index.projectColor(project.parentPath) : undefined;
@@ -1179,9 +1236,74 @@ export class TaskMainView extends ItemView {
     renderProjectProgress(metadata, project);
   }
 
+  /** The project page's description card; hidden without one, and left alone while it is being edited. */
+  private renderHeaderDescription(project: Project | undefined): void {
+    const card = this.headerDescription;
+    if (!card || card.querySelector("textarea")) return;
+    card.empty();
+    card.hidden = !project?.description;
+    if (!project?.description) return;
+    card.setText(project.description);
+    card.setAttribute("role", "button");
+    card.setAttribute("tabindex", "0");
+    card.setAttribute("aria-label", "Edit description");
+    card.setAttribute("data-tm-focus-key", "project-description");
+    card.onclick = event => {
+      // A selection being made, or a link clicked, is not a request to edit.
+      if (card.ownerDocument.getSelection()?.toString()) return;
+      event.preventDefault();
+      this.editDescription(project);
+    };
+    card.onkeydown = event => {
+      if (event.target !== card || (event.key !== "Enter" && event.key !== " ")) return;
+      event.preventDefault();
+      this.editDescription(project);
+    };
+  }
+
+  /** Edits the description in its card: leaving the field (or Cmd/Ctrl+Enter) saves it, Escape keeps the old one. */
+  private editDescription(project: Project): void {
+    const card = this.headerDescription;
+    if (!card || card.querySelector("textarea")) return;
+    card.empty();
+    card.hidden = false;
+    card.removeAttribute("role");
+    card.removeAttribute("tabindex");
+    card.removeAttribute("aria-label");
+    card.onclick = null;
+    card.onkeydown = null;
+    const original = project.description ?? "";
+    const field = card.createEl("textarea", { cls: "tm-project-description-input", attr: { "aria-label": "Description", placeholder: "Add a description", rows: "3" } });
+    field.value = original;
+    const fit = (): void => { field.style.height = "auto"; field.style.height = `${field.scrollHeight}px`; };
+    let cancelled = false;
+    const finish = (): void => {
+      field.remove();
+      const text = field.value.trim();
+      const latest = this.plugin.index.projects().find(item => item.path === project.path) ?? project;
+      if (cancelled || text === original.trim()) { this.renderHeaderDescription(latest); return; }
+      this.renderHeaderDescription({ ...latest, description: text || undefined });
+      void this.plugin.setProjectDescription(project.path, text).catch((cause: unknown) => {
+        new Notice(cause instanceof Error ? cause.message : "Could not save the description.");
+        this.renderHeaderDescription(latest);
+      });
+    };
+    field.addEventListener("input", fit);
+    field.addEventListener("blur", finish, { once: true });
+    field.addEventListener("keydown", event => {
+      event.stopPropagation();
+      if (event.key === "Escape") { event.preventDefault(); cancelled = true; field.blur(); }
+      else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); field.blur(); }
+    });
+    field.focus();
+    fit();
+  }
+
   /** What the View default grouping groups this view's tasks by (see renderTaskLayouts and kanbanColumns). */
   private defaultGroupLabel(): string {
+    if (this.isGantt) return "Active, completed and archived";
     if (this.layout === "calendar") return "None";
+    if (this.isProjectsView) return this.layout === "kanban" ? "Status" : "Active, completed and archived";
     const { mode, path } = this.defaults;
     if (path) return "Heading";
     if (mode === "today") return "Overdue and today";
@@ -1194,10 +1316,10 @@ export class TaskMainView extends ItemView {
     this.viewOptions = new ViewOptionsPanel(toggle.closest<HTMLElement>(".tm-view-header") ?? container, toggle, {
       state: () => ({
         sort: this.sort, descending: this.descending, grouping: this.grouping, filters: this.propertyFilters,
-        // Completed tasks are left out unless shown or a status filter asks, on boards too.
-        openOnly: !this.showCompleted, defaultGroup: this.defaultGroupLabel(),
-        // The calendar has no room for projects.
-        showProjects: this.showProjects
+        // Completed tasks are left out unless shown or a status filter asks, on boards too; the Projects view lists every project.
+        openOnly: !this.showCompleted && !this.isProjectsView, defaultGroup: this.defaultGroupLabel(),
+        // The calendar has no room for projects; the Projects view lists nothing else.
+        showProjects: this.isProjectsView ? undefined : this.showProjects
       }),
       update: change => {
         if (change.sort !== undefined) this.sort = change.sort;
@@ -1214,12 +1336,13 @@ export class TaskMainView extends ItemView {
         this.saveViewOptions();
         this.renderTaskResults();
       },
-      // Read lazily: the panel outlives task changes, so choices must reflect the current tasks.
-      tasks: () => this.plugin.index.allTasks(),
+      // Read lazily: the panel outlives task changes, so choices must reflect the current tasks (or projects).
+      tasks: () => this.isProjectsView ? this.allProjectItems() : this.plugin.index.allTasks(),
+      ...this.isProjectsView ? { properties: PROJECT_PROPERTIES } : {},
       expanded: () => this.filtersExpanded,
       setExpanded: open => { this.filtersExpanded = open; },
-      // A smart list already is one: its options save into it instead.
-      ...(this.state.mode !== "smartLists" ? { convert: (anchor: HTMLElement) => this.convertToSmartList(anchor) } : {
+      // A smart list already is one: its options save into it instead. Smart lists list tasks, not projects.
+      ...this.isProjectsView ? {} : (this.state.mode !== "smartLists" ? { convert: (anchor: HTMLElement) => this.convertToSmartList(anchor) } : {
         updateSmartList: {
           changed: () => {
             const list = this.plugin.settings.smartLists.find(item => item.id === this.state.smartListId);
@@ -1299,57 +1422,41 @@ export class TaskMainView extends ItemView {
     }
   }
 
-  private renderProjectList(container: HTMLElement): void {
-    const header = container.createDiv({ cls: "tm-view-header" });
-    const title = header.createDiv({ cls: "tm-title-group" }).createDiv();
-    pageTitle(title, "Projects");
-    const actions = header.createDiv({ cls: "tm-header-actions" });
-    const layouts = actions.createDiv({ cls: "tm-layout-controls", attr: { "aria-label": "Projects layout" } });
-    for (const [layout, icon] of [["list", "list"], ["gantt", "chart-gantt"]] as const) {
-      const button = layouts.createEl("button", { cls: "clickable-icon", attr: { "aria-label": `${layout === "gantt" ? "Gantt" : "List"} projects view`, "aria-pressed": String(this.projectLayout === layout), title: `${layout === "gantt" ? "Gantt" : "List"} view`, "data-tm-focus-key": `project-layout-${layout}` } });
-      setIcon(button, icon);
-      button.addEventListener("click", () => {
-        if (layout === "gantt" && this.projectLayout !== "gantt") this.ganttAnchor = ganttYearStart(todayIso());
-        this.projectLayout = layout; this.saveLayout(); this.render();
-      });
+  /** The Projects view's Gantt: the projects its filters leave, archived ones too, on a timeline. */
+  private renderProjectGantt(container: HTMLElement, items: Task[]): void {
+    const projects = items.map(item => this.shownProjects.get(item.id)).filter((project): project is Project => Boolean(project));
+    if (!projects.length) { this.renderEmpty(container); return; }
+    renderGantt(container, {
+      projects,
+      anchor: this.ganttAnchor, zoom: this.ganttZoom, dateFormat: this.plugin.dateFormat(), things: this.plugin.settings.style === "things",
+      navigate: (anchor, zoom, scale) => { this.ganttAnchor = anchor; this.ganttZoom = zoom; this.ganttScale = scale; this.savePeriod(); this.render(); },
+      viewportChanged: anchor => { this.ganttAnchor = anchor; },
+      scale: this.ganttScale,
+      // The timeline redraws itself; the view keeps where it is for its next drawing.
+      zoomed: (anchor, zoom, scale) => { this.ganttAnchor = anchor; this.ganttZoom = zoom; this.ganttScale = scale; this.savePeriod(); },
+      open: project => { void this.plugin.openProject(project.path).catch(error => new Notice(String(error))); },
+      edit: (project, field) => this.openProjectProperty(project, field),
+      menu: (project, at, anchor) => this.openProjectMenu(project, anchor, at),
+      update: async (project, changes) => {
+        const file = this.app.vault.getAbstractFileByPath(project.path);
+        if (!(file instanceof TFile)) throw new Error("Project note no longer exists.");
+        await this.plugin.store.updateFrontmatter(file, (frontmatter: Record<string, unknown>) => updateProjectDates(frontmatter, changes, project, this.plugin.dateFormat()), `Changed dates of “${project.name}”`);
+        await this.plugin.index.refreshPath(project.path);
+      }
+    });
+  }
+
+  /**
+   * The Projects list by View default: Active, Completed and Archived, each with subprojects under their parents.
+   * Siblings go by name, or by the view's sort when one is chosen.
+   */
+  private renderProjectGroups(container: HTMLElement, items: Task[]): void {
+    const projects = items.map(item => this.shownProjects.get(item.id)).filter((project): project is Project => Boolean(project));
+    const statuses = projectStatuses(this.plugin.index.projects());
+    const order = this.sort === "date" && !this.descending ? undefined : new Map(projects.map((project, index) => [project.path, index]));
+    for (const [title, status] of [["Active", "active"], ["Completed", "completed"], ["Archived", "archived"]] as const) {
+      this.renderProjectGroup(container, title, projects.filter(project => statuses.get(project.path) === status), order);
     }
-    const create = actions.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "Create new project", title: "Create new project" } });
-    setIcon(create, "plus");
-    create.addEventListener("click", () => this.plugin.openProjectCreator());
-    const projects = this.plugin.index.projects();
-    const statuses = projectStatuses(projects);
-    const withStatus = (status: string): Project[] => projects.filter(project => statuses.get(project.path) === status);
-    if (!projects.length) {
-      const empty = container.createDiv({ cls: "tm-empty" });
-      const icon = empty.createDiv({ cls: "tm-empty-icon" });
-      setIcon(icon, "target");
-      empty.createEl("h3", { text: "No projects yet" });
-      empty.createEl("p", { text: "Add #project to a note or include project in its frontmatter tags." });
-      return;
-    }
-    if (this.projectLayout === "gantt") {
-      renderGantt(container, {
-        projects,
-        anchor: this.ganttAnchor, zoom: this.ganttZoom, dateFormat: this.plugin.dateFormat(), things: this.plugin.settings.style === "things",
-        navigate: (anchor, zoom, scale) => { this.ganttAnchor = anchor; this.ganttZoom = zoom; this.ganttScale = scale; this.savePeriod(); this.render(); },
-        viewportChanged: anchor => { this.ganttAnchor = anchor; },
-        scale: this.ganttScale,
-        // The timeline redraws itself; the view keeps where it is for its next drawing.
-        zoomed: (anchor, zoom, scale) => { this.ganttAnchor = anchor; this.ganttZoom = zoom; this.ganttScale = scale; this.savePeriod(); },
-        open: project => { void this.plugin.openProject(project.path).catch(error => new Notice(String(error))); },
-        edit: (project, field) => this.openProjectProperty(project, field),
-        update: async (project, changes) => {
-          const file = this.app.vault.getAbstractFileByPath(project.path);
-          if (!(file instanceof TFile)) throw new Error("Project note no longer exists.");
-          await this.plugin.store.updateFrontmatter(file, (frontmatter: Record<string, unknown>) => updateProjectDates(frontmatter, changes, project, this.plugin.dateFormat()), `Changed dates of “${project.name}”`);
-          await this.plugin.index.refreshPath(project.path);
-        }
-      });
-      return;
-    }
-    this.renderProjectGroup(container, "Active", withStatus("active"));
-    this.renderProjectGroup(container, "Completed", withStatus("completed"));
-    this.renderProjectGroup(container, "Archived", withStatus("archived"));
   }
 
   /** Moves a project dragged to `date` in the calendar: its start goes there and its end keeps its distance, or, with
@@ -1368,12 +1475,34 @@ export class TaskMainView extends ItemView {
     await this.plugin.index.refreshPath(project.path);
   }
 
-  private renderProjectGroup(container: HTMLElement, title: string, projects: Project[]): void {
+  /** A project dropped in a board's column takes the column's status, priority or date. */
+  private async dropProject(project: Project, group?: ListDropGroup): Promise<void> {
+    if (!group?.property) return;
+    const value = group.value;
+    if (group.property === "status") {
+      const status = typeof value === "string" ? statusFromLabel(value) : undefined;
+      if (!status || status === project.status) return;
+      await this.plugin.updateProject(project.path, draft => ({ ...draft, status }));
+    } else if (group.property === "priority") {
+      const priority = typeof value === "number" ? String(value) : "";
+      if (priority === (project.priority ? String(project.priority) : "")) return;
+      await this.plugin.updateProject(project.path, draft => ({ ...draft, priority }));
+    } else if (group.property === "date" || group.property === "scheduledDate" || group.property === "deadline") {
+      // A column without a date takes none away: a project's dates are set in its own popovers.
+      if (typeof value !== "string") return;
+      if (group.property === "date") { await this.moveProject(project, value); return; }
+      const field = group.property === "deadline" ? "deadline" : "date";
+      if ((field === "date" ? project.scheduledDate : project.deadline) === value) return;
+      await this.plugin.updateProject(project.path, draft => ({ ...draft, [field]: value }));
+    } else new Notice("Projects move between columns of a status, a priority or a date.");
+  }
+
+  private renderProjectGroup(container: HTMLElement, title: string, projects: Project[], order?: ReadonlyMap<string, number>): void {
     if (!projects.length) return;
     const section = container.createEl("section", { cls: "tm-section" });
     section.createEl("h2", { text: title }).createSpan({ cls: "tm-section-count", text: String(projects.length) });
     const list = section.createDiv({ cls: "tm-task-list", attr: { role: "list" } });
-    for (const { project, depth } of projectHierarchy(projects)) this.renderProjectRow(list, project, depth);
+    for (const { project, depth } of projectHierarchy(projects, order)) this.renderProjectRow(list, project, depth);
   }
 
   /**
@@ -1411,6 +1540,8 @@ export class TaskMainView extends ItemView {
   }
 
   private renderGroupAddButton(parent: HTMLElement, title: string, target?: ListDropGroup): void {
+    // A group of projects has no tasks to add.
+    if (this.isProjectsView) return;
     const add = parent.createEl("button", { cls: "clickable-icon tm-group-add-task", attr: {
       type: "button", "aria-label": `Add task to ${title}`, title: `Add task to ${title}`
     } });
@@ -1550,6 +1681,8 @@ export class TaskMainView extends ItemView {
 
   private async dropListTask(original: Task, group?: ListDropGroup, originalAnchor?: Task, placement?: ListPlacement): Promise<void> {
     try {
+      const project = this.shownProjects.get(original.id);
+      if (project) { await this.dropProject(project, group); return; }
       const selected = this.draggedTasks.length ? this.draggedTasks : [original];
       for (const task of selected) {
         const current = this.plugin.index.taskById(task.id);
@@ -2086,7 +2219,13 @@ export class TaskMainView extends ItemView {
   private renderTaskRow(list: HTMLElement, task: Task, depth: number, target?: ListDropGroup, foldable = false): void {
     // A project shown among the tasks: its progress in place of a checkbox, and a project's actions.
     const project = this.shownProjects.get(task.id);
-    if (project) { this.renderProjectRow(list, project, depth, this.layout === "kanban"); return; }
+    if (project) {
+      const row = this.renderProjectRow(list, project, depth, this.layout === "kanban");
+      // On the Projects board, a project moves between columns: its status, priority or dates.
+      const primary = row.querySelector<HTMLElement>(".tm-task-primary");
+      if (this.isProjectsView && this.layout === "kanban" && primary) this.listDrag?.row(row, primary, task, target);
+      return;
+    }
     if (this.expanded?.id === task.id && this.plugin.settings.style === "things") { this.renderTaskCard(list, task, depth); return; }
     const things = this.plugin.settings.style === "things";
     // Things board cards read like an open task card; list rows are one line.
@@ -2521,6 +2660,17 @@ export class TaskMainView extends ItemView {
   private renderEmpty(container: HTMLElement): void {
     const empty = container.createDiv({ cls: "tm-empty" });
     const icon = empty.createDiv({ cls: "tm-empty-icon" });
+    if (this.isProjectsView) {
+      setIcon(icon, "target");
+      if (this.plugin.index.projects().length) {
+        empty.createEl("h3", { text: "Nothing here" });
+        empty.createEl("p", { text: "No projects match the current filters." });
+      } else {
+        empty.createEl("h3", { text: "No projects yet" });
+        empty.createEl("p", { text: "Add #project to a note or include project in its frontmatter tags." });
+      }
+      return;
+    }
     setIcon(icon, "circle-check-big");
     empty.createEl("h3", { text: "Nothing here" });
     empty.createEl("p", { text: this.propertyFilters.length ? "No tasks match the current filters." : this.showCompleted ? "No tasks match this view." : "You're caught up. Completed tasks are hidden." });
