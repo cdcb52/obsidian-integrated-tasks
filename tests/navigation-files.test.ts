@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
-import { beforeAll, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { installObsidianDom } from "./helpers/obsidian-dom";
+import { firePointer, gap, gapPlace, grab, layOutSidebar } from "./helpers/nav-drag";
 
 const menus: Array<{ titles: string[]; checked: string[]; click(title: string): void }> = [];
 vi.mock("obsidian", async importOriginal => {
@@ -24,6 +25,7 @@ vi.mock("obsidian", async importOriginal => {
   return { ...await importOriginal<typeof import("./obsidian-mock")>(), Menu, Keymap: { isModEvent: (event: MouseEvent) => event.metaKey }, Notice: class {}, setIcon: vi.fn() };
 });
 
+import { EditorView } from "@codemirror/view";
 import { TFile, TFolder, type WorkspaceLeaf } from "obsidian";
 import { sortFiles, TaskNavigationView } from "../src/navigation-view";
 import { dropTargetOf } from "../src/sidebar-drop";
@@ -31,6 +33,8 @@ import { DEFAULT_SETTINGS } from "../src/types";
 import type TaskManagerPlugin from "../src/main";
 
 beforeAll(() => installObsidianDom());
+beforeEach(() => layOutSidebar());
+afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); document.body.empty(); });
 
 function setup() {
   const byPath = new Map<string, TFile | TFolder>();
@@ -59,13 +63,17 @@ function setup() {
   const create = vi.fn(async (path: string) => file(path, root));
   const app = {
     vault: { getRoot: () => root, getAbstractFileByPath: (path: string) => byPath.get(path) ?? null, on: () => ({}), create, createFolder: vi.fn() },
-    workspace: { getActiveFile: () => note, getLeaf, on: () => ({}), trigger: vi.fn(), requestSaveLayout: vi.fn(), getActiveViewOfType: () => null },
-    fileManager: { renameFile, promptForDeletion: vi.fn() },
+    workspace: {
+      getActiveFile: vi.fn(() => note as TFile | null), getLeaf, on: vi.fn((name: string, callback: (...args: unknown[]) => void) => { workspaceEvents.set(name, callback); return {}; }),
+      trigger: vi.fn(), requestSaveLayout: vi.fn(), getActiveViewOfType: () => null, getLeavesOfType: () => [] as unknown[], rootSplit: {}
+    },
+    fileManager: { renameFile, promptForDeletion: vi.fn(), generateMarkdownLink: (file: TFile) => `[[${file.basename}]]` },
     // Records what the tree hands Obsidian's drag manager: what each row drags, and what each drops.
     dragManager: {
       drags: new Map<HTMLElement, (event: DragEvent) => unknown>(),
       drops: new Map<HTMLElement, (event: DragEvent, draggable: unknown, hovering: boolean) => unknown>(),
-      handleDrag(element: HTMLElement, start: (event: DragEvent) => unknown) { this.drags.set(element, start); },
+      // As Obsidian does, the element becomes draggable.
+      handleDrag(element: HTMLElement, start: (event: DragEvent) => unknown) { element.draggable = true; this.drags.set(element, start); },
       handleDrop(element: HTMLElement, drop: (event: DragEvent, draggable: unknown, hovering: boolean) => unknown) { this.drops.set(element, drop); },
       dragFile: (_event: DragEvent, file: TFile) => ({ type: "file", file }),
       dragFolder: (_event: DragEvent, folder: TFolder) => ({ type: "folder", file: folder })
@@ -73,16 +81,28 @@ function setup() {
   };
   const settings = { ...DEFAULT_SETTINGS, showFiles: false };
   const saveSettings = vi.fn(async () => {});
+  let emit = (): void => {};
+  const query = vi.fn(() => []);
   const plugin = {
-    settings, saveSettings, index: { projects: () => [], tagSummaries: () => [], query: () => [], subscribe: () => () => {} },
+    settings, saveSettings, index: { projects: () => [], tagSummaries: () => [], query, subscribe: (listener: () => void) => { emit = listener; return () => {}; } },
     isFavorite: (key: string) => settings.favorites.includes(key), toggleFavorite: vi.fn(async (key: string) => { settings.favorites = [...settings.favorites, key]; })
   } as unknown as TaskManagerPlugin;
   const view = new TaskNavigationView({ app } as unknown as WorkspaceLeaf, plugin);
   const container = view.containerEl.children[1] as HTMLElement;
   const labels = () => Array.from(container.querySelectorAll(".tm-nav-files .tm-nav-children .tm-nav-label, .tm-nav-files input")).map(label => label.textContent || (label as HTMLInputElement).value);
   const row = (key: string) => container.querySelector(`[data-tm-nav-key="${key}"]`)!.closest(".tm-nav-item") as HTMLElement;
-  return { view, settings, container, labels, row, app, getLeaf, openFile, renameFile, create, root, work, plugin, saveSettings };
+  /** Moves `file` into `folder` as Obsidian would, for a rename that is let through. */
+  const move = (file: TFile | TFolder, folder: TFolder) => {
+    const from = file.parent!;
+    from.children.splice(from.children.indexOf(file), 1);
+    folder.children.push(file);
+    byPath.delete(file.path);
+    Object.assign(file, { parent: folder, path: folder.path === "/" ? file.name : `${folder.path}/${file.name}` });
+    byPath.set(file.path, file);
+  };
+  return { view, settings, container, labels, row, app, getLeaf, openFile, renameFile, create, root, work, plugin, saveSettings, move, query, emit: () => emit(), workspaceEvents };
 }
+const workspaceEvents = new Map<string, (...args: unknown[]) => void>();
 
 it("indents smart lists a step under All Tasks, as subprojects are under their parent", () => {
   const { view, settings, row } = setup();
@@ -184,106 +204,163 @@ it("adds folder and sort buttons to the toolbar with the files, and sorts files 
   expect(names("byCreatedTimeReverse")).toEqual(["Work", "Notes 2.md", "Notes 10.md"]);
 });
 
-it("drags files as the file explorer does, and moves files and folders dropped on a folder", async () => {
+it("drags files natively with Option held, as the file explorer does; without it, they lift and move into a folder", async () => {
   const { view, settings, row, app, renameFile, root, work } = setup();
   settings.showFiles = true;
   view.refresh();
-  const { drags, drops } = app.dragManager;
+  const { drags } = app.dragManager;
   const notes = row("file:Notes 2.md");
   const folder = row("folder:Work");
-  const heading = row("files");
   expect(drags.get(notes)!({} as DragEvent)).toEqual({ type: "file", file: root.children[2] });
   expect(drags.get(folder)!({} as DragEvent)).toEqual({ type: "folder", file: work });
-  // Folders and the Files heading (the vault's top) take files, and so does a note, beside it; a note takes tasks too.
-  expect(drops.has(folder) && drops.has(heading) && drops.has(notes)).toBe(true);
+  // A note takes tasks too.
   expect(dropTargetOf(notes)?.drop).toEqual({ kind: "note", path: "Notes 2.md" });
   expect(dropTargetOf(folder)).toBeUndefined();
+  // With Option, the press is the native drag's: nothing lifts.
+  firePointer(notes.querySelector(".tm-nav-label")!, "pointerdown", { altKey: true, clientY: 50 });
+  firePointer(notes, "pointermove", { clientY: 80 });
+  expect(document.querySelector(".tm-drag-preview")).toBeNull();
+  expect(notes.draggable).toBe(true);
+  firePointer(notes, "pointerup", { clientY: 80 });
+  // Without it, the note lifts; over a folder's middle the folder lights up and the gap opens inside it.
   const note = root.children[2];
-  // Hovering says where the file goes and lights the folder up, without moving it.
-  expect(drops.get(folder)!({} as DragEvent, { type: "file", file: note }, true)).toMatchObject({ action: "Move into Work", dropEffect: "move", hoverEl: folder });
+  const drag = grab(notes).to(folder, 10);
+  expect(folder.classList.contains("is-drop-target")).toBe(true);
+  expect(gapPlace()).toEqual({ above: "Work", depth: "1" });
   expect(renameFile).not.toHaveBeenCalled();
-  drops.get(folder)!({} as DragEvent, { type: "file", file: note }, false);
+  drag.drop();
   await vi.waitFor(() => expect(renameFile).toHaveBeenCalledWith(note, "Work/Notes 2.md"));
-  // A file already in the folder, or a folder dropped into itself, goes nowhere.
-  expect(drops.get(heading)!({} as DragEvent, { type: "file", file: note }, true)).toMatchObject({ dropEffect: "none" });
-  expect(drops.get(folder)!({} as DragEvent, { type: "folder", file: work }, true)).toMatchObject({ dropEffect: "none" });
-  // Something that is not a file, such as a task, is left to other targets.
-  expect(drops.get(folder)!({} as DragEvent, null, true)).toBeUndefined();
+  // Into a closed folder, it goes out of sight at once.
+  expect(notes.style.height).toBe("0px");
+  expect(gap()).toBeNull();
+  // A folder doesn't go into itself, and nothing goes where it already is.
+  const back = grab(row("folder:Work")).to(row("file:Notes 10.md"), 10);
+  expect(gapPlace()!.above).toBe("Notes 10");
+  back.to(gap()!, 10).drop();
+  await vi.waitFor(() => expect(gap()).toBeNull());
+  expect(renameFile).toHaveBeenCalledOnce();
 });
 
 it("puts files dragged beside a file or folder at that place, and keeps that order as the tree's custom order", async () => {
-  const { view, settings, row, labels, app, renameFile, root, work, saveSettings } = setup();
+  const { view, settings, row, labels, renameFile, root, work, saveSettings, move } = setup();
   settings.showFiles = true;
   view.refresh();
-  const { drops } = app.dragManager;
-  const [notes10, notes2] = [root.children[1], root.children[2]] as TFile[];
-  /** Drops `file` on `key`'s row: at its top (`y` 2), its middle (10) or its bottom (18), of 20. */
-  const drop = (key: string, file: TFile | TFolder, y: number, hovering = false) => {
-    const target = row(key);
-    target.getBoundingClientRect = () => ({ top: 0, height: 20 }) as DOMRect;
-    return drops.get(target)!({ clientY: y } as DragEvent, { type: file instanceof TFolder ? "folder" : "file", file }, hovering);
-  };
   expect(labels()).toEqual(["Work", "Notes 2", "Notes 10"]);
-  // Hovering shows a line where it goes.
-  expect(drop("file:Notes 2.md", notes10, 2, true)).toMatchObject({ action: "Move here", dropEffect: "move", hoverClass: "tm-nav-drop-before" });
-  expect(row("file:Notes 2.md").classList.contains("tm-nav-drop-before")).toBe(true);
-  drop("file:Notes 2.md", notes10, 2);
+  // Over the top of Notes 2, the gap opens above it, and the rows make room.
+  const drag = grab(row("file:Notes 10.md")).to(row("file:Notes 2.md"), 4);
+  expect(gapPlace()).toEqual({ above: "Work", depth: "0" });
+  drag.drop();
   await vi.waitFor(() => expect(labels()).toEqual(["Work", "Notes 10", "Notes 2"]));
   expect(settings.customFileOrder).toBe(true);
   expect(settings.navOrder.files["/"]).toEqual(["Work", "Notes 10.md", "Notes 2.md"]);
   expect(saveSettings).toHaveBeenCalled();
-  expect(row("file:Notes 2.md").classList.contains("tm-nav-drop-before")).toBe(false);
   // Files and folders mix: a note goes above a folder from the top of its row, and into it from the middle.
-  drop("folder:Work", notes2, 2);
+  grab(row("file:Notes 2.md")).to(row("folder:Work"), 2).drop();
   await vi.waitFor(() => expect(labels()).toEqual(["Notes 2", "Work", "Notes 10"]));
-  expect(drop("folder:Work", notes2, 10, true)).toMatchObject({ action: "Move into Work", hoverClass: "is-drop-target" });
   expect(renameFile).not.toHaveBeenCalled();
   // From another folder, it moves here first.
+  (row("folder:Work").querySelector(".tm-nav-label") as HTMLElement).click();
   const plan = work.children[0] as TFile;
-  expect(drop("file:Notes 10.md", plan, 18, true)).toMatchObject({ action: "Move into the vault", hoverClass: "tm-nav-drop-after" });
-  drop("file:Notes 10.md", plan, 18);
+  renameFile.mockImplementationOnce(async () => move(plan, root));
+  const out = grab(row("file:Work/Plan.md")).to(row("file:Notes 10.md"), 16);
+  expect(gapPlace()).toEqual({ above: "Notes 10", depth: "0" });
+  out.drop();
   await vi.waitFor(() => expect(renameFile).toHaveBeenCalledWith(plan, "Plan.md"));
   await vi.waitFor(() => expect(settings.navOrder.files["/"]).toEqual(["Notes 2.md", "Work", "Notes 10.md", "Plan.md"]));
-  // Nothing goes beside itself.
-  expect(drop("file:Notes 10.md", notes10, 2, true)).toMatchObject({ dropEffect: "none" });
+  await vi.waitFor(() => expect(labels()).toEqual(["Notes 2", "Work", "diagram", "Notes 10", "Plan"]));
   // The sort menu says the order is custom; another order sorts again, keeping the custom one for later.
   (view.containerEl.querySelector('[aria-label="Change sort order"]') as HTMLElement).click();
   await vi.waitFor(() => expect(menus[menus.length - 1].titles).toContain("Custom order"));
   expect(menus[menus.length - 1].checked).toEqual(["Custom order"]);
   menus[menus.length - 1].click("File name (A to Z)");
-  await vi.waitFor(() => expect(labels()).toEqual(["Work", "Notes 2", "Notes 10"]));
+  await vi.waitFor(() => expect(labels()).toEqual(["Work", "diagram", "Notes 2", "Notes 10", "Plan"]));
   expect(settings.customFileOrder).toBe(false);
-  expect(settings.navOrder.files["/"]).toHaveLength(4);
   (view.containerEl.querySelector('[aria-label="Change sort order"]') as HTMLElement).click();
   await vi.waitFor(() => expect(menus[menus.length - 1].checked).toEqual(["File name (A to Z)"]));
   menus[menus.length - 1].click("Custom order");
-  await vi.waitFor(() => expect(labels()).toEqual(["Notes 2", "Work", "Notes 10"]));
+  await vi.waitFor(() => expect(labels()).toEqual(["Notes 2", "Work", "diagram", "Notes 10", "Plan"]));
 });
 
-it("keeps the file tree as it is through a file drag and the drop's moves, then redraws it once", async () => {
-  const { view, settings, row, labels, app, renameFile, root, work } = setup();
+it("opens a closed folder a file rests on, and takes the last file of an open folder out of it, moving left", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  const { view, settings, row, labels, renameFile, root, work } = setup();
+  settings.showFiles = true;
+  view.refresh();
+  const drag = grab(row("file:Notes 2.md")).to(row("folder:Work"), 10);
+  expect(labels()).toEqual(["Work", "Notes 2", "Notes 10"]);
+  // Resting on it, Work opens: its files show under the gap, where the note would go.
+  vi.advanceTimersByTime(600);
+  expect(labels()).toEqual(["Work", "diagram", "Plan", "Notes 2", "Notes 10"]);
+  expect(gapPlace()).toEqual({ above: "Work", depth: "1" });
+  expect(row("folder:Work").querySelector(".tm-nav-label")!.getAttribute("aria-expanded")).toBe("true");
+  // After Plan, the last of Work's files, it goes into Work; moving left, out of it, after Work.
+  drag.to(row("file:Work/Plan.md"), 16);
+  expect(gapPlace()).toEqual({ above: "Plan", depth: "1" });
+  drag.to(gap()!, 10, -30);
+  expect(gapPlace()).toEqual({ above: "Plan", depth: "0" });
+  drag.drop();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(renameFile).not.toHaveBeenCalled();
+  expect(settings.navOrder.files["/"]).toEqual(["Work", "Notes 2.md", "Notes 10.md"]);
+  // The last file of an open folder, at its own place, comes out of it moving left.
+  const plan = work.children[0] as TFile;
+  await vi.advanceTimersByTimeAsync(2000);
+  const out = grab(row("file:Work/Plan.md")).to(gap()!, 10, -30);
+  expect(gapPlace()).toEqual({ above: "diagram", depth: "0" });
+  out.drop();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(renameFile).toHaveBeenCalledWith(plan, "Plan.md");
+  expect(root.children).toContain(work);
+});
+
+it("lands a file let go on a folder that opened under it among that folder's files, without waiting for the move", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  const { view, settings, row, labels, renameFile } = setup();
+  settings.showFiles = true;
+  view.refresh();
+  renameFile.mockImplementationOnce(() => new Promise<void>(() => {}));
+  const dragged = row("file:Notes 2.md");
+  const drag = grab(dragged).to(row("folder:Work"), 10);
+  vi.advanceTimersByTime(600);
+  // Let go without moving again: the note shows at once where the gap was, first in Work.
+  drag.drop();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(renameFile).toHaveBeenCalledOnce();
+  expect(dragged.style.height).toBe("");
+  expect(dragged.style.getPropertyValue("--tm-nav-depth")).toBe("1");
+  expect(labels()).toEqual(["Work", "Notes 2", "diagram", "Plan", "Notes 10"]);
+});
+
+it("keeps the file tree as it is through a file drag and the drop's moves, then redraws it once they pause", async () => {
+  const { view, settings, row, labels, app, renameFile, root, work, move, emit, query } = setup();
   settings.showFiles = true;
   await view.onOpen();
   const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
-  const [notes2, notes10] = [root.children[2], root.children[1]] as TFile[];
+  const notes2 = root.children[2] as TFile;
   const dragged = row("file:Notes 2.md");
-  dragged.dispatchEvent(new Event("dragstart", { bubbles: true }));
+  const drag = grab(dragged);
   // Redrawn mid-drag, the row dragged would be gone, and the rows under the pointer would jump.
   view.refresh();
   await frame();
   expect(row("file:Notes 2.md")).toBe(dragged);
-  // Dropped into Work, the tree waits for the move (and the links Obsidian updates with it), however long it takes.
+  // Dropped into Work, the note goes out of sight at once; the tree waits for the move (and the links Obsidian
+  // updates with it), however long it takes.
   let moved!: () => void;
   renameFile.mockImplementationOnce(() => new Promise<void>(resolve => { moved = resolve; }));
-  app.dragManager.drops.get(row("folder:Work"))!({} as DragEvent, { type: "file", file: notes2 }, false);
-  window.dispatchEvent(new Event("dragend"));
-  view.refresh();
+  drag.to(row("folder:Work"), 10).drop();
+  await vi.waitFor(() => expect(renameFile).toHaveBeenCalledOnce());
+  expect(dragged.style.height).toBe("0px");
+  emit();
+  view.refresh(true);
   await frame();
   expect(row("file:Notes 2.md")).toBe(dragged);
-  root.children.splice(root.children.indexOf(notes2), 1);
-  work.children.push(Object.assign(notes2, { parent: work, path: "Work/Notes 2.md" }));
+  move(notes2, work);
   moved();
+  // Then the burst of index updates the move sets off: one redraw once they pause.
+  const counted = query.mock.calls.length;
+  emit(); emit();
   await vi.waitFor(() => expect(labels()).toEqual(["Work", "diagram", "Notes 2", "Plan", "Notes 10"]));
+  expect(query.mock.calls.length - counted).toBeLessThanOrEqual(2);
   // Something dragged in from elsewhere (the file explorer) holds the tree too, until it leaves.
   const over = row("file:Notes 10.md");
   over.dispatchEvent(new Event("dragenter", { bubbles: true }));
@@ -291,21 +368,90 @@ it("keeps the file tree as it is through a file drag and the drop's moves, then 
   expect(row("file:Notes 10.md")).toBe(over);
   over.dispatchEvent(new MouseEvent("dragleave", { bubbles: true, relatedTarget: document.body }));
   await vi.waitFor(() => expect(row("file:Notes 10.md")).not.toBe(over));
-  // Hovering measures a row once, and marks it only where the place changes; a scroll measures again.
+  // A file from the file explorer opens the gap where it would go; let go, the row already here moves there at once.
+  const list = container(view).querySelector<HTMLElement>(".tm-nav-list")!;
+  const point = (target: HTMLElement, at: number) => ({ clientX: 100, clientY: target.getBoundingClientRect().top + at }) as DragEvent;
+  const notes10 = root.children.find(file => file.name === "Notes 10.md")!;
   const target = row("folder:Work");
-  const measure = vi.fn(() => ({ top: 0, height: 20 }) as DOMRect);
-  target.getBoundingClientRect = measure;
-  const hover = (y: number) => app.dragManager.drops.get(target)!({ clientY: y } as DragEvent, { type: "file", file: notes10 }, true);
-  for (const y of [2, 3, 10, 11]) hover(y);
-  expect(measure).toHaveBeenCalledOnce();
-  expect(target.classList.contains("is-drop-target")).toBe(true);
-  expect(target.classList.contains("tm-nav-drop-before")).toBe(false);
-  container(view).dispatchEvent(new Event("scroll"));
-  hover(2);
-  expect(measure).toHaveBeenCalledTimes(2);
-  expect([target.classList.contains("tm-nav-drop-before"), target.classList.contains("is-drop-target")]).toEqual([true, false]);
+  expect(app.dragManager.drops.get(list)!(point(target, 2), { type: "file", file: notes10 }, true)).toMatchObject({ action: "Move here", dropEffect: "move" });
+  expect(gapPlace()).toEqual({ above: null, depth: "0" });
+  const row10 = row("file:Notes 10.md");
+  app.dragManager.drops.get(list)!(point(target, 2), { type: "file", file: notes10 }, false);
+  expect(row10.nextElementSibling).toBe(target);
+  expect(gap()).toBeNull();
   window.dispatchEvent(new Event("dragend"));
-  expect(target.classList.contains("tm-nav-drop-before")).toBe(false);
+  await view.onClose();
+});
+
+it("drops files let go outside the sidebar onto a folder in the file explorer, or into a note as a link", async () => {
+  const { view, settings, row, renameFile, root } = setup();
+  settings.showFiles = true;
+  view.refresh();
+  const notes2 = root.children[2] as TFile;
+  // The file explorer, beside the sidebar.
+  const explorer = document.body.createDiv({ cls: "nav-files-container" });
+  const folder = explorer.createDiv({ cls: "nav-folder-title", attr: { "data-path": "Work" } });
+  document.elementFromPoint = () => folder;
+  const outside = 2000;
+  let drag = grab(row("file:Notes 2.md")).to(outside);
+  // Outside, the rows close back up and a label with its name follows the pointer.
+  expect(document.querySelector(".tm-drag-chip")!.textContent).toBe("Notes 2");
+  expect(gapPlace()).toEqual({ above: "Work", depth: "0" });
+  drag.drop();
+  await vi.waitFor(() => expect(renameFile).toHaveBeenCalledWith(notes2, "Work/Notes 2.md"));
+  expect(document.querySelector(".tm-drag-chip, .tm-drag-preview")).toBeNull();
+  // A note: a link where it is let go.
+  const editor = document.body.createDiv({ cls: "cm-editor" });
+  document.elementFromPoint = () => editor;
+  const editorView = { posAtCoords: vi.fn(() => 5), state: { selection: { main: { head: 0 } } }, dispatch: vi.fn(), focus: vi.fn() };
+  vi.spyOn(EditorView, "findFromDOM").mockReturnValue(editorView as unknown as EditorView);
+  drag = grab(row("file:Notes 10.md")).to(outside);
+  drag.drop();
+  await vi.waitFor(() => expect(editorView.dispatch).toHaveBeenCalledWith({ changes: { from: 5, insert: "[[Notes 10]]" }, selection: { anchor: 17 } }));
+  expect(renameFile).toHaveBeenCalledOnce();
+  // Anywhere else, it flies back.
+  document.elementFromPoint = () => document.body;
+  drag = grab(row("file:Notes 10.md")).to(outside);
+  drag.drop();
+  await vi.waitFor(() => expect(document.querySelector(".tm-drag-preview")).toBeNull());
+  expect(row("file:Notes 10.md").classList.contains("tm-drag-source")).toBe(false);
+  expect(editorView.dispatch).toHaveBeenCalledOnce();
+});
+
+it("marks the open file in place, and counts open tasks and draws icons once until something changes", async () => {
+  const { view, settings, row, app, query, emit, workspaceEvents } = setup();
+  settings.showFiles = true;
+  await view.onOpen();
+  const notes10 = row("file:Notes 10.md");
+  const notes2 = row("file:Notes 2.md");
+  expect(notes10.classList.contains("is-active")).toBe(true);
+  // Another file opening marks its row, and unmarks the other, without drawing the list again.
+  app.workspace.getActiveFile.mockReturnValue(app.vault.getAbstractFileByPath("Notes 2.md") as TFile);
+  workspaceEvents.get("file-open")!();
+  workspaceEvents.get("active-leaf-change")!(null);
+  expect(row("file:Notes 2.md")).toBe(notes2);
+  expect([notes2.classList.contains("is-active"), notes10.classList.contains("is-active")]).toEqual([true, false]);
+  expect(notes2.querySelector(".tm-nav-label")!.getAttribute("aria-current")).toBe("page");
+  // A list opening marks it in place too.
+  const inbox = row("mode:inbox");
+  view.setActive("inbox");
+  expect(row("mode:inbox")).toBe(inbox);
+  expect(inbox.classList.contains("is-active")).toBe(true);
+  // Inbox and Today are counted once; folding a folder draws the list again without counting again.
+  const counted = query.mock.calls.length;
+  (row("folder:Work").querySelector(".tm-nav-label") as HTMLElement).click();
+  expect(query.mock.calls.length).toBe(counted);
+  emit();
+  await vi.waitFor(() => expect(query.mock.calls.length).toBe(counted + 2));
+  // An icon is drawn once, and copied after that.
+  const { setIcon } = await import("obsidian");
+  vi.mocked(setIcon).mockImplementation((element: HTMLElement, name: string) => { element.createSpan({ cls: `svg-${name}` }); });
+  vi.mocked(setIcon).mockClear();
+  view.refresh();
+  view.refresh();
+  const drawn = vi.mocked(setIcon).mock.calls.map(call => call[1]);
+  expect(new Set(drawn).size).toBe(drawn.length);
+  expect(row("file:Notes 2.md").querySelector(".svg-file-text")).not.toBeNull();
   await view.onClose();
 });
 

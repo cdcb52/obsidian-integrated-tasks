@@ -83,20 +83,50 @@
 /* Hover and the open item look as the file explorer's do, in the theme's own colours. */
 .tm-navigation .tm-nav-item:hover { background: var(--nav-item-background-hover, var(--background-modifier-hover)); }
 .tm-navigation .tm-nav-item.is-active { background: var(--nav-item-background-active, var(--background-modifier-hover)); color: var(--nav-item-color-active, var(--text-normal)); }
-/* An item dragged to a new place: it fades where it was, and a line in the accent colour shows where it goes (for a
-   project, indented as deep as it will be). */
+/* An item dragged, as a task is in a list: it lifts and follows the pointer, the rows it leaves close up, and a gap
+   opens where it would land (indented as deep as it will be), the rows around sliding aside. An item that only joins
+   Favorites stays where it is, faded. */
 .tm-navigation .tm-nav-item.is-being-dragged { opacity: 0.5; }
-.tm-navigation .tm-nav-item:is(.tm-nav-drop-before, .tm-nav-drop-after)::after {
-  content: "";
-  position: absolute;
-  inset-inline: calc(8px + var(--tm-nav-drop-depth, var(--tm-nav-depth, 0)) * 16px) 8px;
-  height: 2px;
-  border-radius: 1px;
-  background: var(--interactive-accent);
+.tm-navigation .tm-drop-gap { margin-inline-start: calc(var(--tm-depth, 0) * 16px); }
+.tm-navigation .tm-drop-gap::before { inset: 1px 0; border-radius: 8px; }
+/* The lifted item, in a layer of its own over everything, so the list scrolling under it leaves it be. */
+.tm-navigation.tm-nav-drag-layer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  padding: 0;
+  overflow: visible;
   pointer-events: none;
+  z-index: var(--layer-dragged-item, 10000);
 }
-.tm-navigation .tm-nav-item.tm-nav-drop-before::after { top: -1px; }
-.tm-navigation .tm-nav-item.tm-nav-drop-after::after { bottom: -1px; }
+.tm-nav-drag-layer .tm-nav-item.tm-drag-preview {
+  position: fixed;
+  margin: 0;
+  box-sizing: border-box;
+  border-radius: 8px;
+  background: linear-gradient(var(--background-modifier-hover), var(--background-modifier-hover)), var(--background-secondary);
+  box-shadow: var(--shadow-l);
+  scale: 1.02;
+  transition: none;
+  animation: tm-drag-lift 150ms cubic-bezier(0.2, 0, 0, 1);
+}
+.tm-nav-drag-layer .tm-nav-item.tm-drag-preview.is-settling {
+  scale: 1;
+  box-shadow: var(--shadow-s);
+  transition: scale 150ms cubic-bezier(0.2, 0, 0, 1), box-shadow 150ms cubic-bezier(0.2, 0, 0, 1);
+}
+.tm-nav-drag-layer .tm-nav-item.tm-drag-preview .tm-nav-collapse { opacity: 0; }
+/* Outside the sidebar, a label with the item's name follows the pointer instead. */
+.tm-nav-drag-layer .tm-nav-item.tm-drag-preview.is-outside { visibility: hidden; }
+/* On touch screens a long press lifts the item, ready to drag. */
+.tm-navigation .tm-nav-item.is-drag-armed { background: var(--background-modifier-hover); box-shadow: var(--shadow-l); }
+body.is-mobile .tm-navigation .tm-nav-item { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+@media (prefers-reduced-motion: reduce) {
+  .tm-nav-drag-layer .tm-nav-item.tm-drag-preview { animation: none; scale: 1; }
+  .tm-nav-drag-layer .tm-nav-item.tm-drag-preview.is-settling { transition: none; }
+}
 /* A task dragged over a list that takes it, as in Things: the list lights up in the accent colour. */
 .tm-navigation .tm-nav-item.is-drop-target { background: var(--interactive-accent); color: var(--text-on-accent); }
 .tm-navigation .tm-nav-item.is-drop-target .tm-nav-icon, .tm-navigation .tm-nav-item.is-drop-target .tm-nav-count,

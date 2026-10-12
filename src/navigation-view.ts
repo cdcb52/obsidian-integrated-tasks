@@ -1,3 +1,4 @@
+import { EditorView } from "@codemirror/view";
 import { ItemView, Keymap, Menu, Notice, setIcon, TFile, TFolder, type TAbstractFile, type WorkspaceLeaf } from "obsidian";
 import type TaskManagerPlugin from "./main";
 import type { FileSortOrder, Project, TaskManagerSettings, TaskViewMode } from "./types";
@@ -6,6 +7,7 @@ import { projectHierarchy } from "./project-hierarchy";
 import { activeTaskDrag, highlightDropTarget, markDropTarget, TASK_DRAG_TYPE, type SidebarDrop } from "./sidebar-drop";
 import { inOrder, moveKey } from "./sidebar-order";
 import { leafFor } from "./leaves";
+import { NavDragController, SIDE_HYSTERESIS_PX, type NavDrag, type NavGap, type NavIntent, type Point } from "./navigation-drag";
 
 export const TASK_NAV_VIEW = "task-manager-navigation";
 
@@ -88,19 +90,64 @@ const NAV_MODES = new Set<TaskViewMode>([...NAV_GROUPS.flat().map(entry => entry
 
 /** A row's icon, its colour, its count of open tasks, and whether what it folds is open (for a row whose click folds). */
 interface NavItemOptions { icon?: string; color?: string; count?: number; expanded?: boolean }
-/** Where a dragged item goes: before or after the row it is over, or (a folder's middle) into it. */
-type DropPlace = "before" | "after" | "into";
 /** A project's row in the sidebar's tree, as drawn: how deep it is, and the project it shows under ("" for none). */
 interface NavProjectRow { path: string; depth: number; parent: string; row: HTMLElement }
-/** Where a dragged project goes: its line (before or after a row, as deep as it will be), its parent and the project it follows. */
-interface ProjectDrop { row: HTMLElement; place: "before" | "after"; depth: number; parent: string; after?: string }
-/** Dragging a project this far right (a level per this much) puts it under the project above; left, out from under its parent. */
+/** Where a dragged project goes: as deep as it will be, its parent, and the project it follows. */
+interface ProjectDrop { depth: number; parent: string; after?: string }
+/** Dragging a project or file this far right (a level per this much) puts it under the one above; left, out a level. */
 const NEST_PX = 24;
 const OUTDENT_PX = 16;
 /** Where in the sidebar a file row is: the Files tree, or Favorites (a favourite folder's files). Renaming happens in one. */
 type FileScope = "files" | "favorites";
-/** The type a sidebar item drags with while it moves to a new place: its own, so it drops nowhere else (not into a note as text). */
-const NAV_DRAG_TYPE = "application/x-task-manager-nav-item";
+/** After a drop's file moves, the index and vault events they cause (each note whose links Obsidian rewrites) redraw
+ * the list once they pause this long, or at the latest after BURST_MAX_MS. */
+const SETTLE_MS = 100;
+const BURST_QUIET_MS = 300;
+const BURST_MAX_MS = 2000;
+
+/**
+ * What a row in the sidebar is, as a drag reads it: where something dropped beside it goes, and what it carries when
+ * it is dragged. Favorites' heading (and its empty hint) is the end of Favorites; the Files heading, the vault's top.
+ */
+type NavItem =
+  | { kind: "favorite"; key: string }
+  | { kind: "list"; mode: TaskViewMode }
+  | { kind: "smartList"; id: string }
+  | { kind: "tag"; name: string }
+  | { kind: "project"; drawn: NavProjectRow; rows: NavProjectRow[]; place: (dragged: NavProjectRow, drop: ProjectDrop) => Promise<void> }
+  | { kind: "file"; file: TFile | TFolder; depth: number; scope: FileScope }
+  | { kind: "favorites" }
+  | { kind: "root" };
+/** What is dragged: a row (with what it is as a favourite, to drop into Favorites), or files from the file explorer. */
+interface NavDragItem { item?: NavItem; favorite?: string; files?: Array<TFile | TFolder>; label: string }
+
+/** Lucide icons, drawn once each and copied for every row after that. */
+const ICONS = new Map<string, Node>();
+/** Draws icon `name` into `parent`: drawing an icon parses its SVG, so after the first time it is copied instead. */
+export function navIcon(parent: HTMLElement, name: string): void {
+  parent.setAttribute("data-icon", name);
+  const drawn = ICONS.get(name);
+  if (!drawn) {
+    parent.empty();
+    setIcon(parent, name);
+    // An icon that did not draw (none by that name yet) is drawn again next time.
+    if (parent.firstChild) ICONS.set(name, parent.cloneNode(true));
+    return;
+  }
+  parent.empty();
+  for (const child of Array.from(drawn.childNodes)) parent.appendChild(child.cloneNode(true));
+}
+
+/** A row's depth in its tree (projects, files), as drawn. */
+function depthOf(row: Element): number {
+  return Number.parseInt((row as HTMLElement).style?.getPropertyValue("--tm-nav-depth") || "0", 10) || 0;
+}
+
+/** The files and folders Obsidian's drag manager carries, if any. */
+function draggedFiles(draggable: Draggable | null): Array<TFile | TFolder> {
+  const files = draggable?.type === "files" ? draggable.files ?? [] : draggable?.type === "file" || draggable?.type === "folder" ? [draggable.file] : [];
+  return files.filter((file): file is TFile | TFolder => file instanceof TFile || file instanceof TFolder);
+}
 
 export class TaskNavigationView extends ItemView {
   private activeMode: TaskViewMode = "today";
@@ -130,21 +177,40 @@ export class TaskNavigationView extends ItemView {
   private pendingRender = false;
   private releaseTimer?: number;
   private closed = false;
-  /**
-   * The item being dragged to a new place: the rows it can go among (see sortable), where the drag began, and what it is
-   * as a favourite, for a drop into Favorites. The list waits for the drop.
-   */
-  private dragging?: { group: string; key: string; x?: number; favorite?: string };
+  /** Until then, after a drop's file moves, redraws wait for the burst of index and vault events to pause. */
+  private burstUntil = 0;
+  /** A file row dragged natively (with Option held), as from the file explorer: the list waits for the drop. */
+  private nativeDrag = false;
   /** Something dragged over the list (a file from the file explorer, say): the rows under it stay until it leaves or drops. */
   private dragOver = false;
   /** A drop's file moves under way: the list redraws once they are done (see whileMoving). */
   private moving = 0;
-  /** Where the drop line (or, for a drop into a row, its highlight) is, so a pointer move touches only what changed. */
-  private dropMark?: { row: HTMLElement; place: DropPlace; depth?: number };
-  /** Rows measured during a drag, each once, until the list scrolls or is redrawn. */
-  private rects = new WeakMap<HTMLElement, DOMRect>();
-  /** The open file's path, looked up once per redraw for the file rows. */
+  /** The open file's path, for the file rows. */
   private activeFile?: string;
+  /** Each row's label and key, so marking what is open changes two rows rather than redrawing the list. */
+  private labels: Array<{ row: HTMLElement; label: HTMLElement; key: string }> = [];
+  /** What each row is, for a drag (see NavItem), and the lists drops go into. */
+  private rowItems = new WeakMap<HTMLElement, { item: NavItem; favorite?: string }>();
+  private listEl?: HTMLElement;
+  private favoritesHeading?: HTMLElement;
+  private favoritesChildren?: HTMLElement;
+  private filesChildren?: HTMLElement;
+  /** What the index says, read once until it changes: the open task counts (by day), and the projects. */
+  private counts = new Map<string, number>();
+  private countsDay = "";
+  private projectList?: Project[];
+  /** Drags the rows, as the task lists drag theirs. */
+  private readonly drag = new NavDragController<NavDragItem>({
+    list: () => this.listEl,
+    scroller: () => this.containerEl.children[1] as HTMLElement | undefined,
+    layerClasses: () => [...this.settings.density === "compact" ? ["tm-density-compact"] : [], ...this.settings.style === "things" ? ["tm-style-things"] : []],
+    resolve: (element, point, drag) => this.resolveDrop(element, point, drag),
+    source: row => this.dragSource(row),
+    home: (row, item, depth, x) => this.dragHome(row, item, depth, x),
+    label: item => item.label,
+    dropOutside: (point, item) => this.dropOutside(point, item),
+    onIdle: () => this.resumeRender()
+  });
   // The toolbar is one tab stop; arrow keys move between its buttons.
   private toolbarFocus = 0;
   constructor(leaf: WorkspaceLeaf, private readonly plugin: TaskManagerPlugin) { super(leaf); }
@@ -160,9 +226,13 @@ export class TaskNavigationView extends ItemView {
   }
   async onOpen(): Promise<void> {
     this.closed = false;
-    this.unsubscribe = this.plugin.index.subscribe(() => this.scheduleSettledRender());
+    this.unsubscribe = this.plugin.index.subscribe(() => {
+      // Counts and projects are read again on the next redraw.
+      this.forgetIndex();
+      this.scheduleSettledRender();
+    });
     const syncActive = (): void => {
-      if (this.plugin.settings.showFiles) this.scheduleRender();
+      if (this.plugin.settings.showFiles || this.labels.some(entry => entry.key.startsWith("file:"))) this.markActiveFile();
       this.followActiveView();
     };
     // Only a tab in the main area changes what is open; the sidebar itself (or another) becoming active changes nothing.
@@ -184,26 +254,25 @@ export class TaskNavigationView extends ItemView {
     };
     this.registerDomEvent(this.containerEl, "pointerdown", () => {
       this.pressed = true;
-      // No drag goes on during a press: one whose end never came here is over.
-      this.dragging = undefined;
+      // No native drag goes on during a press: one whose end never came here is over.
+      this.nativeDrag = false;
       this.dragOver = false;
     });
     this.registerDomEvent(this.containerEl.win, "pointerup", release, true);
     this.registerDomEvent(this.containerEl.win, "pointercancel", release, true);
-    // While something is dragged over the list, it stays as it is (see render).
+    // While something is dragged over the list natively (a file from the file explorer), it stays as it is (see render).
     const over = (): void => { this.dragOver = true; };
     this.registerDomEvent(this.containerEl, "dragenter", over, true);
     this.registerDomEvent(this.containerEl, "dragover", over, true);
     this.registerDomEvent(this.containerEl, "dragleave", event => {
       if (this.containerEl.contains(event.relatedTarget as Node | null)) return;
       this.dragOver = false;
+      this.drag.leaveExternal();
       this.resumeRender();
     }, true);
-    this.registerDomEvent(this.containerEl, "scroll", () => { this.rects = new WeakMap(); }, true);
-    // A drag that ends anywhere (dropped elsewhere, or let go) takes its drop line with it.
-    this.registerDomEvent(this.containerEl.win, "dragend", () => this.endDrag(), true);
+    // A native drag that ends anywhere (dropped elsewhere, or let go) takes its gap with it.
+    this.registerDomEvent(this.containerEl.win, "dragend", () => this.endNativeDrag(), true);
     this.registerDomEvent(this.containerEl.win, "drop", () => {
-      this.showDropLine();
       this.dragOver = false;
       this.resumeRender();
     }, true);
@@ -214,6 +283,7 @@ export class TaskNavigationView extends ItemView {
     this.closed = true;
     this.unsubscribe?.();
     this.cancelRender();
+    this.drag.dispose();
     if (this.settleTimer !== undefined) this.containerEl.win.clearTimeout(this.settleTimer);
     this.settleTimer = undefined;
     if (this.releaseTimer !== undefined) this.containerEl.win.clearTimeout(this.releaseTimer);
@@ -222,11 +292,53 @@ export class TaskNavigationView extends ItemView {
   setActive(mode: TaskViewMode, tag?: string, project?: string, smartListId?: string): void {
     this.activeSmartList = smartListId;
     this.activeMode = mode; this.activeTag = tag; this.activeProject = project;
-    // The section holding the open item unfolds, so it shows.
-    if (smartListId) this.expanded.add("smartLists");
-    else if (tag) this.expanded.add("tags");
-    else if (project) this.expanded.add("projects");
-    this.render();
+    // The section holding the open item unfolds, so it shows; then the list is drawn again. Otherwise only the
+    // rows that were and are now open change.
+    const section: NavSection | undefined = smartListId ? "smartLists" : tag ? "tags" : project ? "projects" : undefined;
+    const unfolds = section !== undefined && !this.expanded.has(section);
+    if (section) this.expanded.add(section);
+    if (unfolds || this.hidesActiveProject() || !this.labels.length) this.render();
+    else this.markActive();
+  }
+
+  /** Whether a parent of the open project is folded, so drawing the list again unfolds it. */
+  private hidesActiveProject(): boolean {
+    if (!this.activeProject || !this.foldedProjects.size) return false;
+    const byPath = new Map(this.projects().map(project => [project.path, project]));
+    for (let path = byPath.get(this.activeProject)?.parentPath; path; path = byPath.get(path)?.parentPath) if (this.foldedProjects.has(path)) return true;
+    return false;
+  }
+
+  /** Marks the rows of what is open (a list, smart list, project, tag or file), and unmarks the rest, in place. */
+  private markActive(): void {
+    for (const { row, label, key } of this.labels) {
+      const active = this.isActiveKey(key);
+      if (row.classList.contains("is-active") === active) continue;
+      row.toggleClass("is-active", active);
+      label.setAttribute("aria-current", active ? "page" : "false");
+    }
+  }
+
+  /** The open file changed: its rows are marked, without drawing the list again. */
+  private markActiveFile(): void {
+    const path = this.app.workspace.getActiveFile?.()?.path;
+    if (path === this.activeFile) return;
+    this.activeFile = path;
+    this.markActive();
+  }
+
+  /** Whether the row with `key` (as data-tm-nav-key has it, in Favorites too) shows what is open. */
+  private isActiveKey(key: string): boolean {
+    const bare = key.startsWith("favorite:") ? key.slice("favorite:".length) : key;
+    const colon = bare.indexOf(":");
+    if (colon < 0) return false;
+    const [kind, value] = [bare.slice(0, colon), bare.slice(colon + 1)];
+    if (kind === "mode") return this.listActive(value as TaskViewMode);
+    if (kind === "list") return this.activeSmartList === value;
+    if (kind === "project") return this.activeProject === value;
+    if (kind === "tag") return this.activeTag === value;
+    if (kind === "file") return this.activeFile === value;
+    return false;
   }
 
   /** Marks what the task tab in front lists, when another tab comes to the front or Back and Forward change what it lists. */
@@ -247,11 +359,19 @@ export class TaskNavigationView extends ItemView {
 
   /** Redraws the list now, or (`soon`) in the next frame, along with anything else that changed by then. */
   refresh(soon = false): void {
+    // Something outside changed (a setting, the smart lists): what the index says is read again too.
+    this.forgetIndex();
     if (soon) this.scheduleRender(); else this.render();
   }
 
-  /** Changes arrive in bursts, so render at most once per frame. */
+  /** Changes arrive in bursts, so render at most once per frame (after a drop's moves, once they pause). */
   private scheduleRender(): void {
+    if (this.closed || this.frame !== undefined) return;
+    if (Date.now() < this.burstUntil) { this.scheduleSettledRender(); return; }
+    this.renderNextFrame();
+  }
+
+  private renderNextFrame(): void {
     if (this.closed || this.frame !== undefined) return;
     this.frame = this.containerEl.win.requestAnimationFrame(() => {
       this.frame = undefined;
@@ -262,16 +382,19 @@ export class TaskNavigationView extends ItemView {
 
   /**
    * Index and vault events come in bursts (a moved note changes every note that links to it, each one indexed again),
-   * so the list redraws once they pause.
+   * so the list redraws once they pause; after a drop's moves, once they pause a little longer.
    */
   private scheduleSettledRender(): void {
     if (this.closed) return;
     const win = this.containerEl.win;
     if (this.settleTimer !== undefined) win.clearTimeout(this.settleTimer);
+    const now = Date.now();
+    const delay = now < this.burstUntil ? Math.min(BURST_QUIET_MS, this.burstUntil - now) : SETTLE_MS;
     this.settleTimer = win.setTimeout(() => {
       this.settleTimer = undefined;
-      this.scheduleRender();
-    }, 100);
+      this.burstUntil = 0;
+      this.renderNextFrame();
+    }, delay);
   }
 
   /** A redraw that waited (for a press, a drag or a drop's moves) happens, once nothing holds it any more. */
@@ -285,6 +408,29 @@ export class TaskNavigationView extends ItemView {
     this.frame = undefined;
   }
 
+  /** What the index said is read again when next needed. */
+  private forgetIndex(): void {
+    this.counts.clear();
+    this.projectList = undefined;
+  }
+
+  /** The projects, read from the index once until it changes. */
+  private projects(): Project[] {
+    return this.projectList ??= this.plugin.index.projects();
+  }
+
+  /** How many open tasks a list has, counted once until the index (or the day) changes. */
+  private openCount(mode: TaskViewMode): number {
+    const day = new Date().toDateString();
+    if (day !== this.countsDay) { this.counts.clear(); this.countsDay = day; }
+    let count = this.counts.get(mode);
+    if (count === undefined) {
+      count = this.plugin.index.query({ mode, showCompleted: false }).length;
+      this.counts.set(mode, count);
+    }
+    return count;
+  }
+
   private get settings(): TaskManagerSettings { return this.plugin.settings; }
 
   private render(): void {
@@ -292,11 +438,13 @@ export class TaskNavigationView extends ItemView {
     if (this.closed) return;
     // Rebuilding the list mid-press, or mid-drag, would take away the row being pressed or dragged (or the rows under it);
     // mid-drop, the files being moved would redraw it again and again.
-    if (this.pressed || this.dragging || this.dragOver || this.moving) { this.pendingRender = true; return; }
+    if (this.pressed || this.drag.dragging || this.nativeDrag || this.dragOver || this.moving) { this.pendingRender = true; return; }
     this.pendingRender = false;
-    // The rows are drawn anew.
-    this.dropMark = undefined;
-    this.rects = new WeakMap();
+    // The rows are drawn anew: what they were is forgotten.
+    this.drag.dispose();
+    this.labels = [];
+    this.rowItems = new WeakMap();
+    this.favoritesHeading = this.favoritesChildren = this.filesChildren = undefined;
     const container = this.containerEl.children[1] as HTMLElement;
     // Rebuilding the list would drop keyboard focus and scroll position; restore both afterwards.
     const focused = container.ownerDocument.activeElement as HTMLElement | null;
@@ -316,7 +464,7 @@ export class TaskNavigationView extends ItemView {
     };
     const action = (label: string, icon: string, run: () => void | Promise<void>): HTMLButtonElement => {
       const button = toolbar.createEl("button", { cls: "clickable-icon nav-action-button", attr: { "aria-label": label, title: label, "data-tm-nav-key": `action:${label}` } });
-      setIcon(button, icon);
+      navIcon(button, icon);
       const index = buttons.push(button) - 1;
       button.addEventListener("focus", () => rove(index));
       button.addEventListener("click", () => { void Promise.resolve().then(run).catch(error => new Notice(String(error))); });
@@ -351,17 +499,20 @@ export class TaskNavigationView extends ItemView {
     rove(Math.min(this.toolbarFocus, buttons.length - 1));
 
     const nav = container.createDiv({ cls: "nav-files-container tm-nav-list", attr: { "aria-label": "Task navigation" } });
+    this.listEl = nav;
     if (this.settings.showFiles || this.settings.favorites?.some(key => /^(file|folder):/.test(key))) {
       this.watchFiles();
       this.activeFile = this.app.workspace.getActiveFile()?.path;
     }
+    // Files and folders dragged in from the file explorer drop anywhere in the list, through Obsidian's drag manager.
+    this.externalDrop(nav);
     this.renderFavorites(nav);
     for (const group of NAV_GROUPS) {
       const lists = nav.createDiv({ cls: "tm-nav-group" });
       for (const entry of group) {
         const row = this.listRow(lists, entry.mode, `mode:${entry.mode}`);
         // The lists keep their places; they drag only into Favorites.
-        this.sortable(row, "lists", entry.mode, undefined, `mode:${entry.mode}`);
+        this.draggable(row, { kind: "list", mode: entry.mode }, `mode:${entry.mode}`);
         // Smart lists, being saved views of all tasks, sit under All Tasks.
         if (entry.mode !== "all" || !this.folder(row, "smartLists", "smart lists")) continue;
         const children = lists.createDiv({ cls: "tree-item-children nav-folder-children tm-nav-children" });
@@ -370,10 +521,7 @@ export class TaskNavigationView extends ItemView {
         for (const list of smartLists) {
           const item = this.smartListRow(children, list.id, `list:${list.id}`);
           item?.setCssProps({ "--tm-nav-depth": "1" });
-          if (item) this.sortable(item, "smartLists", list.id, (id, target, after) => this.saveOrder(() => {
-            const ids = moveKey(this.settings.smartLists.map(list => list.id), id, target, after);
-            this.settings.smartLists = inOrder(this.settings.smartLists, ids, list => list.id);
-          }), `list:${list.id}`);
+          if (item) this.draggable(item, { kind: "smartList", id: list.id }, `list:${list.id}`);
         }
         if (!smartLists.length) children.createDiv({ cls: "tm-nav-empty", text: "No smart lists yet" });
       }
@@ -388,7 +536,7 @@ export class TaskNavigationView extends ItemView {
       if (!this.folder(heading, section, label)) { group.addClass("is-folded"); continue; }
       const children = group.createDiv({ cls: "tree-item-children nav-folder-children tm-nav-children" });
       if (section === "projects") {
-        const projects = activeProjects(this.plugin.index.projects());
+        const projects = activeProjects(this.projects());
         // The open project's parents stay unfolded, so it shows.
         const byPath = new Map(projects.map(project => [project.path, project]));
         for (let path = byPath.get(this.activeProject ?? "")?.parentPath; path; path = byPath.get(path)?.parentPath) this.foldedProjects.delete(path);
@@ -406,7 +554,7 @@ export class TaskNavigationView extends ItemView {
           row.style.setProperty("--tm-nav-depth", String(depth));
           const drawn: NavProjectRow = { path: project.path, depth, parent: depth ? parents[depth - 1] : "", row };
           rows.push(drawn);
-          this.projectDrag(drawn, rows, (dragged, drop) => this.placeProject(projects, tree.map(entry => entry.project.path), dragged, drop));
+          this.draggable(row, { kind: "project", drawn, rows, place: (dragged, drop) => this.placeProject(projects, tree.map(entry => entry.project.path), dragged, drop) }, `project:${project.path}`);
           if ((tree[index + 1]?.depth ?? 0) <= depth) return;
           const folded = this.foldedProjects.has(project.path);
           this.chevron(row, !folded, project.name, `collapse:project:${project.path}`, () => {
@@ -419,9 +567,7 @@ export class TaskNavigationView extends ItemView {
         const tags = inOrder(this.plugin.index.tagSummaries(), this.settings.navOrder?.tags ?? [], tag => tag.name);
         for (const tag of tags) {
           const row = this.tagRow(children, tag, `tag:${tag.name}`);
-          this.sortable(row, "tags", tag.name, (name, target, after) => this.saveOrder(() => {
-            this.settings.navOrder = { ...this.settings.navOrder, tags: moveKey(tags.map(item => item.name), name, target, after) };
-          }), `tag:${tag.name}`);
+          this.draggable(row, { kind: "tag", name: tag.name }, `tag:${tag.name}`);
         }
         if (!tags.length) children.createDiv({ cls: "tm-nav-empty", text: "No tags yet" });
       }
@@ -432,9 +578,10 @@ export class TaskNavigationView extends ItemView {
       const root = this.app.vault.getRoot();
       const heading = this.item(group, "files", "Files", false, () => this.toggleSection("files"), { icon: "folder-tree", color: "section", expanded: this.expanded.has("files") });
       heading.addEventListener("contextmenu", event => this.openFileMenu(event, root));
-      this.fileDrop(heading, root);
+      this.dropZone(heading, { kind: "root" });
       if (this.folder(heading, "files", "files")) {
         const children = group.createDiv({ cls: "tree-item-children nav-folder-children tm-nav-children" });
+        this.filesChildren = children;
         this.renderFolder(children, root, 0, "files");
         if (!root.children.length) children.createDiv({ cls: "tm-nav-empty", text: "No files yet" });
       } else group.addClass("is-folded");
@@ -461,11 +608,12 @@ export class TaskNavigationView extends ItemView {
     const row = parent.createDiv({ cls: `tree-item-self nav-file-title tm-nav-item${active ? " is-active" : ""}${color ? ` is-${color}` : ""}` });
     if (icon) {
       const glyph = row.createDiv({ cls: "tm-nav-icon", attr: { "aria-hidden": "true" } });
-      setIcon(glyph, icon);
+      navIcon(glyph, icon);
     }
     const button = row.createEl("button", { cls: "tm-nav-label", text: label, attr: {
       "aria-current": active ? "page" : "false", title: label, "data-tm-nav-key": key, ...expanded === undefined ? {} : { "aria-expanded": String(expanded) }
     } });
+    this.labels.push({ row, label: button, key });
     button.addEventListener("click", event => { void Promise.resolve(open(event)).catch(error => new Notice(String(error))); });
     if (count) row.createDiv({ cls: "tm-nav-count", text: String(count), attr: { "aria-label": `${count} open` } });
     return row;
@@ -495,7 +643,7 @@ export class TaskNavigationView extends ItemView {
     const projects = mode === "projects";
     const entry = NAV_GROUPS.flat().find(item => item.mode === mode);
     const glyph = projects ? { icon: NAV_SECTIONS[0].icon, color: "muted" } : listGlyph(mode, this.settings.style)!;
-    const count = entry?.count ? this.plugin.index.query({ mode, showCompleted: false }).length : undefined;
+    const count = entry?.count ? this.openCount(mode) : undefined;
     const row = this.item(parent, key, projects ? NAV_SECTIONS[0].label : entry?.label ?? mode, this.listActive(mode),
       event => this.plugin.openTaskView({ mode }, { newLeaf: Keymap.isModEvent(event) }), { ...glyph, count });
     if (mode === "inbox" || mode === "today") this.dropTarget(row, { kind: mode });
@@ -539,74 +687,36 @@ export class TaskNavigationView extends ItemView {
 
   /**
    * Favorites, at the top: any of the sidebar's lists, smart lists, projects, tags, files and folders, added from its
-   * right-click menu, in the order they were added or dragged into. Each works as it does in its own section; a
-   * folder opens in place.
+   * right-click menu or dragged in, in the order they were added or dragged into. Each works as it does in its own
+   * section; a folder opens in place.
    */
   private renderFavorites(nav: HTMLElement): void {
     const group = nav.createDiv({ cls: "tree-item nav-folder tm-nav-group tm-nav-section tm-nav-favorites" });
     const heading = this.item(group, "favorites", "Favorites", false, () => this.toggleSection("favorites"), { icon: "star", color: "section", expanded: this.expanded.has("favorites") });
     // Anything dropped on the heading joins the end of Favorites.
-    this.favoriteDrop(heading);
+    this.favoritesHeading = heading;
+    this.dropZone(heading, { kind: "favorites" });
     if (!this.folder(heading, "favorites", "favorites")) { group.addClass("is-folded"); return; }
     const children = group.createDiv({ cls: "tree-item-children nav-folder-children tm-nav-children" });
+    this.favoritesChildren = children;
     let shown = 0;
     // Looked up once, and only when a favourite needs them.
     let projects: Map<string, Project> | undefined;
     let tags: Map<string, { name: string; openTasks: number }> | undefined;
     const lookup = {
-      project: (path: string) => (projects ??= new Map(this.plugin.index.projects().map(project => [project.path, project]))).get(path),
+      project: (path: string) => (projects ??= new Map(this.projects().map(project => [project.path, project]))).get(path),
       tag: (name: string) => (tags ??= new Map(this.plugin.index.tagSummaries().map(tag => [tag.name, tag]))).get(name)
     };
     for (const key of this.settings.favorites ?? []) {
       const row = this.favoriteRow(children, key, lookup);
       if (!row) continue;
       shown++;
-      this.sortable(row, "favorites", key, (favorite, target, after) => this.saveOrder(() => {
-        this.settings.favorites = moveKey(this.settings.favorites, favorite, target, after);
-      }), key);
-      this.favoriteDrop(row, key);
+      this.draggable(row, { kind: "favorite", key }, key);
       // A favourite folder lists what is in it, as in the file tree.
       const folder = this.favoriteFolder(key);
       if (folder && this.openFolders.has(folder.path)) this.renderFolder(children, folder, 1, "favorites");
     }
-    if (!shown) this.favoriteDrop(children.createDiv({ cls: "tm-nav-empty", text: "Drag an item here, or right-click it" }));
-  }
-
-  /**
-   * Lets items from the rest of the sidebar (and files from the file explorer) drop into Favorites to join them: beside
-   * the favourite `target` is, before or after it, or (no `target`: the heading, or the empty list) at the end. A
-   * favourite dropped there moves; the favourites' own reordering is sortable's.
-   */
-  private favoriteDrop(element: HTMLElement, target?: string): void {
-    const beside = target !== undefined;
-    const mark = (place?: DropPlace): void => this.showDropLine(place && element, place);
-    const dragged = (): string | undefined => this.dragging?.group === "favorites" && beside ? undefined : this.dragging?.favorite;
-    element.addEventListener("dragover", event => {
-      if (!dragged()) return;
-      event.preventDefault();
-      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-      mark(beside ? this.dropPlace(element, event, false) : "into");
-    });
-    element.addEventListener("dragleave", event => { if (!element.contains(event.relatedTarget as Node | null)) mark(); });
-    element.addEventListener("drop", event => {
-      const key = dragged();
-      if (!key) return;
-      event.preventDefault();
-      const after = !beside || this.dropPlace(element, event, false) === "after";
-      mark();
-      this.endDrag();
-      void this.addFavorites([key], target, after).catch(error => new Notice(String(error)));
-    });
-    // Files and folders drag with Obsidian's drag manager, from here or the file explorer.
-    this.dragManager?.handleDrop(element, (event, draggable, hovering) => {
-      const files = (draggable?.type === "files" ? draggable.files ?? [] : draggable?.type === "file" || draggable?.type === "folder" ? [draggable.file] : [])
-        .filter((file): file is TFile | TFolder => file instanceof TFile || (file instanceof TFolder && !file.isRoot()));
-      if (!files.length) return undefined;
-      const place = beside ? this.dropPlace(element, event, false) : "into";
-      mark(hovering ? place : undefined);
-      if (!hovering) void this.addFavorites(files.map(file => `${file instanceof TFolder ? "folder" : "file"}:${file.path}`), target, place === "after");
-      return { action: "Add to favorites", dropEffect: "move", hoverEl: element, hoverClass: beside ? `tm-nav-drop-${place}` : "is-drop-target" };
-    });
+    if (!shown) this.dropZone(children.createDiv({ cls: "tm-nav-empty", text: "Drag an item here, or right-click it" }), { kind: "favorites" });
   }
 
   /** Puts `keys` in Favorites, beside `target` (else at the end), taking them from where they were if already there. */
@@ -667,122 +777,196 @@ export class TaskNavigationView extends ItemView {
     await this.plugin.saveSettings();
   }
 
-  /**
-   * Lets `row` be dragged to a new place among the other rows of its `group` (Favorites, the smart lists, the tags): a
-   * line shows where it goes, before or after the row it is over, and `place` moves it there. Without `place` (the
-   * lists) it keeps its place. As `favorite` it drops into Favorites too (see favoriteDrop).
-   */
-  private sortable(row: HTMLElement, group: string, key: string, place?: (key: string, target: string, after: boolean) => Promise<void>, favorite?: string): void {
-    row.setAttribute("draggable", "true");
-    row.addEventListener("dragstart", event => {
-      if (!event.dataTransfer) return;
-      // A drag is no press: the list redraws once it is dropped.
-      this.pressed = false;
-      this.dragging = { group, key, favorite };
-      // Its own type, so it does not drop into a note as text.
-      event.dataTransfer.setData(NAV_DRAG_TYPE, key);
-      event.dataTransfer.effectAllowed = "move";
-      row.addClass("is-being-dragged");
-    });
-    if (!place) return;
-    const accepts = (): boolean => this.dragging?.group === group && this.dragging.key !== key;
-    row.addEventListener("dragover", event => {
-      if (!accepts()) return;
-      event.preventDefault();
-      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-      this.showDropLine(row, this.dropPlace(row, event, false));
-    });
-    row.addEventListener("dragleave", event => { if (!row.contains(event.relatedTarget as Node | null)) this.showDropLine(); });
-    row.addEventListener("drop", event => {
-      if (!accepts()) return;
-      event.preventDefault();
-      const dragged = this.dragging!.key;
-      const after = this.dropPlace(row, event, false) === "after";
-      this.endDrag();
-      void place(dragged, key, after).catch(error => new Notice(String(error)));
-    });
+  /** Lets `row` (which is `item`, and `favorite` in Favorites) be dragged; `native` rows are files (see fileDrag). */
+  private draggable(row: HTMLElement, item: NavItem, favorite?: string, native = false): void {
+    this.rowItems.set(row, { item, favorite });
+    this.drag.bind(row, native);
+  }
+
+  /** Lets things dropped on `element` (a heading, an empty list's hint) go where `item` says. */
+  private dropZone(element: HTMLElement, item: NavItem): void {
+    this.rowItems.set(element, { item });
+  }
+
+  /** What a drag of `row` carries: what it is, the rows that go with it, and whether it can move from where it is. */
+  private dragSource(row: HTMLElement): { item: NavDragItem; rows: HTMLElement[]; movable: boolean } | undefined {
+    const info = this.rowItems.get(row);
+    if (!info || info.item.kind === "favorites" || info.item.kind === "root") return undefined;
+    if (info.item.kind === "file" && this.renaming?.path === info.item.file.path) return undefined;
+    const label = row.querySelector(".tm-nav-label")?.textContent ?? "";
+    const files = info.item.kind === "file" ? [info.item.file] : undefined;
+    return { item: { item: info.item, favorite: info.favorite, files, label }, rows: this.blockOf(row), movable: info.item.kind !== "list" };
   }
 
   /**
-   * Where something dragged over `row` goes, by how far down the row the pointer is: in its top or bottom half, before
-   * or after it; for a folder (`into`), the middle half is into it, and its bottom only after it while it is closed.
+   * A dragged project's or file's own place, where moving sideways still nests or outdents it: a project right under
+   * the project above, or left out from under its parent; the last file of a folder left, out of the folder.
    */
-  private dropPlace(row: HTMLElement, event: DragEvent, into: boolean, open = false): DropPlace {
-    const rect = this.rectOf(row);
-    const y = event.clientY - rect.top;
-    if (!(rect.height > 0) || !Number.isFinite(y)) return into ? "into" : "after";
-    if (!into) return y < rect.height / 2 ? "before" : "after";
-    return y < rect.height / 4 ? "before" : y > rect.height * 3 / 4 && !open ? "after" : "into";
-  }
-
-  /**
-   * `row`'s place on screen, measured once while the pointer moves over it: measuring on every move would lay out the
-   * whole list again each time, after the drop line changed.
-   */
-  private rectOf(row: HTMLElement): DOMRect {
-    let rect = this.rects.get(row);
-    if (!rect) {
-      rect = row.getBoundingClientRect();
-      this.rects.set(row, rect);
+  private dragHome(row: HTMLElement, source: NavDragItem, depth: number, x: number): NavIntent | undefined {
+    const item = source.item;
+    const own: NavIntent = { gap: { element: row, where: "before", depth }, moves: true };
+    if (item?.kind === "project") {
+      const block = this.projectBlock(item.rows, item.drawn);
+      const others = item.rows.filter(entry => !block.includes(entry));
+      const slot = item.rows.indexOf(item.drawn);
+      const at = (to: number): NavIntent => this.projectSlot(others, item.drawn, slot, item.drawn.depth, to - x, item.place);
+      return { ...own, sideways: to => ({ ...at(to), sideways: at }) };
     }
-    return rect;
-  }
-
-  /**
-   * Shows where a dragged item goes: a line before or after `row`, indented to `depth` when it says how deep it goes,
-   * or (`into`) `row` lit up. None takes it away. Called on every move of the pointer, it touches the rows only when
-   * the place changes.
-   */
-  private showDropLine(row?: HTMLElement, place?: DropPlace, depth?: number): void {
-    const mark = this.dropMark;
-    if (mark?.row === row && mark?.place === place && mark?.depth === depth) return;
-    if (mark) {
-      mark.row.classList.remove("tm-nav-drop-before", "tm-nav-drop-after", "is-drop-target");
-      mark.row.style.removeProperty("--tm-nav-drop-depth");
+    if (item?.kind === "file") {
+      const file = item.file;
+      const next = this.rowAfter(row);
+      const least = item.scope === "favorites" ? 1 : 0;
+      const shallowest = Math.max(least, next ? Math.min(depthOf(next), depth) : least);
+      const at = (to: number): NavIntent => {
+        const dx = to - x;
+        const target = Math.max(shallowest, depth - (dx <= -OUTDENT_PX ? Math.max(1, Math.floor(-dx / NEST_PX)) : 0));
+        if (target === depth || !file.parent) return { ...own, sideways: at };
+        // Out of its folder: after the folder (or the one it is in), in the folder that holds it.
+        let anchor: TAbstractFile = file.parent;
+        for (let level = depth - 1; level > target && anchor.parent; level--) anchor = anchor.parent;
+        const placed = this.fileBeside(row, anchor, [file], true, target, { home: own } as NavDrag<NavDragItem>);
+        return { ...placed, gap: { element: row, where: "after", depth: target }, sideways: at };
+      };
+      return { ...own, sideways: at };
     }
-    this.dropMark = row && place ? { row, place, depth } : undefined;
-    if (!row || !place) return;
-    row.addClass(place === "into" ? "is-drop-target" : `tm-nav-drop-${place}`);
-    if (depth !== undefined) row.style.setProperty("--tm-nav-drop-depth", String(depth));
+    return undefined;
+  }
+
+  /** `row` and the rows that go with it: those after it drawn deeper (subprojects, a folder's open contents). */
+  private blockOf(row: HTMLElement): HTMLElement[] {
+    const depth = depthOf(row);
+    const rows = [row];
+    for (let next = row.nextElementSibling; next; next = next.nextElementSibling) {
+      if (next.classList.contains("tm-drop-gap")) continue;
+      if (!next.classList.contains("tm-nav-item") || depthOf(next) <= depth) break;
+      rows.push(next as HTMLElement);
+    }
+    return rows;
+  }
+
+  /** The next row drawn after `row`'s block, if any, in the same list. */
+  private rowAfter(row: HTMLElement): HTMLElement | undefined {
+    const block = this.blockOf(row);
+    for (let next = block[block.length - 1].nextElementSibling; next; next = next.nextElementSibling) {
+      if (next.classList.contains("tm-drop-gap") || next.classList.contains("tm-drag-source")) continue;
+      return next.classList.contains("tm-nav-item") ? next as HTMLElement : undefined;
+    }
+    return undefined;
   }
 
   /**
-   * Lets a project in the Projects section drag as a task does in a list: up or down to a new place among the
-   * projects, right (a level per 24px) to go under the project above, left to come out from under its parent. Its
-   * subprojects go with it.
+   * Whether a drop over `row` at `point` goes after it, by which half of it the pointer is in; once a side is
+   * chosen, the other needs the pointer a little past the middle.
    */
-  private projectDrag(drawn: NavProjectRow, rows: NavProjectRow[], place: (dragged: NavProjectRow, drop: ProjectDrop) => Promise<void>): void {
-    const { row } = drawn;
-    row.setAttribute("draggable", "true");
-    row.addEventListener("dragstart", event => {
-      if (!event.dataTransfer) return;
-      this.pressed = false;
-      this.dragging = { group: "projects", key: drawn.path, x: event.clientX, favorite: `project:${drawn.path}` };
-      event.dataTransfer.setData(NAV_DRAG_TYPE, drawn.path);
-      event.dataTransfer.effectAllowed = "move";
-      for (const moving of this.projectBlock(rows, drawn)) moving.row.addClass("is-being-dragged");
-    });
-    const dropAt = (event: DragEvent): { dragged: NavProjectRow; drop: ProjectDrop } | undefined => {
-      const drag = this.dragging;
-      const dragged = drag?.group === "projects" ? rows.find(item => item.path === drag.key) : undefined;
-      const drop = dragged && this.projectDrop(rows, drawn, dragged, event, drag?.x ?? event.clientX);
-      return dragged && drop ? { dragged, drop } : undefined;
-    };
-    row.addEventListener("dragover", event => {
-      const found = dropAt(event);
-      if (!found) return;
-      event.preventDefault();
-      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-      this.showDropLine(found.drop.row, found.drop.place, found.drop.depth);
-    });
-    row.addEventListener("dragleave", event => { if (!row.contains(event.relatedTarget as Node | null)) this.showDropLine(); });
-    row.addEventListener("drop", event => {
-      const found = dropAt(event);
-      if (!found) return;
-      event.preventDefault();
-      this.endDrag();
-      void place(found.dragged, found.drop).catch(error => new Notice(String(error)));
-    });
+  private afterHalf(row: HTMLElement, point: Point): boolean {
+    const rect = this.drag.rect(row);
+    const side = this.drag.current?.side;
+    const shift = side?.row === row ? side.after ? -SIDE_HYSTERESIS_PX : SIDE_HYSTERESIS_PX : 0;
+    return point.clientY >= rect.top + rect.height / 2 + shift;
+  }
+
+  /** A drop before or after `row` (after its block), at its depth, doing `commit(after)`. */
+  private beside(row: HTMLElement, point: Point, moves: boolean, commit: (after: boolean) => Promise<void>, action?: string): NavIntent {
+    const after = this.afterHalf(row, point);
+    const block = this.blockOf(row);
+    const gap: NavGap = after ? { element: block[block.length - 1], where: "after", depth: depthOf(row) } : { element: row, where: "before", depth: depthOf(row) };
+    return { gap, moves, side: { row, after }, action, commit: () => commit(after) };
+  }
+
+  /**
+   * What dropping what is dragged over `element` (a row, or Favorites' empty hint) at `point` does. Favourites move
+   * among themselves; anything else with a place in Favorites is added to them; smart lists, tags and projects move
+   * among their own; files and folders move in the file tree. Elsewhere it goes nowhere: back to its own place.
+   */
+  private resolveDrop(element: HTMLElement, point: Point, drag: NavDrag<NavDragItem>): NavIntent | undefined {
+    const target = this.rowItems.get(element)?.item;
+    const source = drag.item;
+    const dragged = source.item;
+    if (!target) return drag.home;
+    const favorites = source.favorite ? [source.favorite]
+      : (source.files ?? []).filter(file => !(file instanceof TFolder && file.isRoot())).map(file => `${file instanceof TFolder ? "folder" : "file"}:${file.path}`);
+    switch (target.kind) {
+      case "favorites": {
+        if (!favorites.length) return drag.home;
+        const end = this.favoritesChildren;
+        const heading = element === this.favoritesHeading ? element : undefined;
+        return {
+          gap: end ? { element: end, where: "end", depth: 0 } : undefined, highlight: heading, moves: dragged?.kind === "favorite",
+          action: "Add to favorites", commit: () => this.addFavorites(favorites, undefined, true)
+        };
+      }
+      case "favorite":
+        if (!favorites.length) return drag.home;
+        return this.beside(element, point, dragged?.kind === "favorite", after => this.addFavorites(favorites, target.key, after), "Add to favorites");
+      case "smartList":
+        if (dragged?.kind !== "smartList") return drag.home;
+        return this.beside(element, point, true, after => this.saveOrder(() => {
+          const ids = moveKey(this.settings.smartLists.map(list => list.id), dragged.id, target.id, after);
+          this.settings.smartLists = inOrder(this.settings.smartLists, ids, list => list.id);
+        }));
+      case "tag":
+        if (dragged?.kind !== "tag") return drag.home;
+        return this.beside(element, point, true, after => this.saveOrder(() => {
+          const names = inOrder(this.plugin.index.tagSummaries(), this.settings.navOrder?.tags ?? [], tag => tag.name).map(tag => tag.name);
+          this.settings.navOrder = { ...this.settings.navOrder, tags: moveKey(names, dragged.name, target.name, after) };
+        }));
+      case "project":
+        if (dragged?.kind !== "project" || dragged.rows !== target.rows) return drag.home;
+        return this.projectIntent(target.drawn, target.rows, dragged.drawn, point, drag.x, target.place);
+      case "file":
+        // A favourite dragged over a favourite folder's files stays where it was going.
+        if (!source.files?.length) return dragged?.kind === "favorite" && target.scope === "favorites" ? undefined : drag.home;
+        return this.fileIntent(element, target, source.files, point, drag);
+      case "root": {
+        const root = this.app.vault.getRoot();
+        const moving = (source.files ?? []).filter(file => canMoveInto(file, root));
+        if (!moving.length) return drag.home;
+        return {
+          gap: this.filesChildren ? { element: this.filesChildren, where: "start", depth: 0 } : undefined, highlight: element, moves: true,
+          land: this.filesChildren ? "gap" : "hide", action: "Move into the vault", commit: () => this.whileMoving(() => this.moveInto(moving, root))
+        };
+      }
+      default:
+        return drag.home;
+    }
+  }
+
+  /**
+   * Where a dragged project goes over `target`, as a task does in a list: above or below it by the pointer's height,
+   * at the depth of the projects there; moving right of where the drag began goes a level deeper per 24px, under the
+   * project above, and moving left comes out a level per 24px (from 16px), as far as the top. Its subprojects go
+   * with it, and not into themselves.
+   */
+  private projectIntent(target: NavProjectRow, rows: NavProjectRow[], dragged: NavProjectRow, point: Point, startX: number, place: (dragged: NavProjectRow, drop: ProjectDrop) => Promise<void>): NavIntent {
+    const block = this.projectBlock(rows, dragged);
+    const others = rows.filter(item => !block.includes(item));
+    const after = this.afterHalf(target.row, point);
+    const index = others.indexOf(target);
+    const slot = after ? index + 1 : index;
+    const below = others[slot];
+    // Below a project with its subprojects open, it goes first among them.
+    const natural = !after ? target.depth : below && below.depth > target.depth ? below.depth : target.depth;
+    const at = (x: number): NavIntent => ({ ...this.projectSlot(others, dragged, slot, natural, x - startX, place), side: { row: target.row, after } });
+    return { ...at(point.clientX), sideways: at };
+  }
+
+  /** `dragged` at `slot` among the `others` (after the one before it), `natural` levels deep but for moving `dx` sideways. */
+  private projectSlot(others: NavProjectRow[], dragged: NavProjectRow, slot: number, natural: number, dx: number, place: (dragged: NavProjectRow, drop: ProjectDrop) => Promise<void>): NavIntent {
+    const above = others[slot - 1];
+    const shift = dx >= NEST_PX ? Math.floor(dx / NEST_PX) : dx <= -OUTDENT_PX ? -Math.max(1, Math.floor(-dx / NEST_PX)) : 0;
+    const depth = Math.max(0, Math.min(natural + shift, above ? above.depth + 1 : 0));
+    let drop: ProjectDrop;
+    if (!above) drop = { depth: 0, parent: "" };
+    else if (depth === above.depth + 1) drop = { depth, parent: above.path, after: above.path };
+    else {
+      // The project above, or the one it is under, at that depth: it follows that one, beside it.
+      let index = slot - 1;
+      while (index > 0 && others[index].depth > depth) index--;
+      const beside = others[index];
+      drop = { depth, parent: beside.parent, after: beside.path };
+    }
+    const gap: NavGap = above ? { element: above.row, where: "after", depth } : { element: others[0]?.row ?? dragged.row, where: "before", depth };
+    return { gap, moves: true, commit: () => place(dragged, drop) };
   }
 
   /** `project`'s row and the rows of its subprojects below it, which drag along with it. */
@@ -791,45 +975,6 @@ export class TaskNavigationView extends ItemView {
     let end = start + 1;
     while (end < rows.length && rows[end].depth > project.depth) end++;
     return rows.slice(start, end);
-  }
-
-  /**
-   * Where `dragged`, over `target`, goes. Above or below `target` by the pointer's height (over its own rows, where it
-   * is), at the depth of the projects there; moving right of where the drag began goes a level deeper per 24px, under
-   * the project above, and moving left comes out a level per 24px (from 16px), as far as the top. Its parent is then
-   * the project above at the level over it, and it follows that project's sibling at its own level.
-   */
-  private projectDrop(rows: NavProjectRow[], target: NavProjectRow, dragged: NavProjectRow, event: DragEvent, startX: number): ProjectDrop | undefined {
-    const block = this.projectBlock(rows, dragged);
-    if (!block.length) return undefined;
-    const others = rows.filter(item => !block.includes(item));
-    let above: NavProjectRow | undefined;
-    let line: Pick<ProjectDrop, "row" | "place">;
-    let natural: number;
-    if (block.includes(target)) {
-      above = others[rows.indexOf(dragged) - 1];
-      line = { row: dragged.row, place: "before" };
-      natural = dragged.depth;
-    } else {
-      const rect = this.rectOf(target.row);
-      const before = rect.height > 0 && event.clientY - rect.top < rect.height / 2;
-      const index = others.indexOf(target);
-      above = before ? others[index - 1] : target;
-      const below = before ? target : others[index + 1];
-      line = { row: target.row, place: before ? "before" : "after" };
-      // Below a project with its subprojects open, it goes first among them.
-      natural = !before && below && below.depth > target.depth ? below.depth : target.depth;
-    }
-    const dx = event.clientX - startX;
-    const shift = dx >= NEST_PX ? Math.floor(dx / NEST_PX) : dx <= -OUTDENT_PX ? -Math.max(1, Math.floor(-dx / NEST_PX)) : 0;
-    const depth = Math.max(0, Math.min(natural + shift, above ? above.depth + 1 : 0));
-    if (!above) return { ...line, depth: 0, parent: "" };
-    if (depth === above.depth + 1) return { ...line, depth, parent: above.path, after: above.path };
-    // The project above, or the one it is under, at that depth: it follows that one, beside it.
-    let index = others.indexOf(above);
-    while (index > 0 && others[index].depth > depth) index--;
-    const beside = others[index];
-    return { ...line, depth, parent: beside.parent, after: beside.path };
   }
 
   /**
@@ -847,7 +992,11 @@ export class TaskNavigationView extends ItemView {
     if (drop.parent === dragged.parent && next.join("\n") === order.join("\n")) return;
     this.settings.navOrder = { ...previous, projects: next };
     if (drop.parent !== dragged.parent) {
-      try { await this.plugin.updateProject(dragged.path, draft => ({ ...draft, parent: drop.parent })); }
+      try {
+        await this.plugin.updateProject(dragged.path, draft => ({ ...draft, parent: drop.parent }));
+        // Its new parent is read from the index again.
+        this.forgetIndex();
+      }
       catch (cause) {
         this.settings.navOrder = previous;
         this.render();
@@ -859,19 +1008,11 @@ export class TaskNavigationView extends ItemView {
     await this.plugin.saveSettings();
   }
 
-  /** A drag is over (a drag is no press either): its line goes, and a redraw that waited for it happens. */
-  private endDrag(): void {
-    this.dragging = undefined;
+  /** A native drag (a file dragged with Option, or from the file explorer) is over: its gap goes, and a waiting redraw happens. */
+  private endNativeDrag(): void {
+    this.nativeDrag = false;
     this.dragOver = false;
-    this.pressed = false;
-    this.showDropLine();
-    this.rects = new WeakMap();
-    // What else is still marked (Obsidian's drag manager marks the rows a file is dragged over too), once, at the end.
-    const container = this.containerEl.children[1] as HTMLElement | undefined;
-    for (const row of Array.from(container?.querySelectorAll?.<HTMLElement>(".is-being-dragged, .is-drop-target, .tm-nav-drop-before, .tm-nav-drop-after") ?? [])) {
-      row.classList.remove("is-being-dragged", "is-drop-target", "tm-nav-drop-before", "tm-nav-drop-after");
-      row.style.removeProperty("--tm-nav-drop-depth");
-    }
+    this.drag.leaveExternal();
     this.resumeRender();
   }
 
@@ -903,7 +1044,7 @@ export class TaskNavigationView extends ItemView {
     const collapse = row.createEl("button", { cls: "clickable-icon tm-nav-collapse", attr: {
       "aria-label": `${open ? "Collapse" : "Expand"} ${label}`, "aria-expanded": String(open), "data-tm-nav-key": key
     } });
-    setIcon(collapse, open ? "chevron-down" : "chevron-right");
+    navIcon(collapse, open ? "chevron-down" : "chevron-right");
     collapse.addEventListener("click", () => { toggle(); this.render(); });
   }
 
@@ -926,7 +1067,8 @@ export class TaskNavigationView extends ItemView {
       }
       changed();
     }));
-    this.registerEvent(this.app.workspace.on("file-open", () => this.scheduleRender()));
+    // The open file is marked where its row is, without drawing the list again.
+    this.registerEvent(this.app.workspace.on("file-open", () => this.markActiveFile()));
   }
 
   /** `folder`'s children in the file tree's order: dragged into place, when they were, else by the chosen order. */
@@ -963,11 +1105,11 @@ export class TaskNavigationView extends ItemView {
     row.addClass(isFolder ? "tm-nav-folder" : "tm-nav-file");
     row.style.setProperty("--tm-nav-depth", String(depth));
     row.addEventListener("contextmenu", event => this.openFileMenu(event, file, scope));
-    // A favourite itself drags among the favourites (see sortable); what is in a favourite folder drags as in the file tree.
-    const favorite = key.startsWith("favorite:");
-    if (!favorite) {
+    // A favourite itself drags among the favourites (see renderFavorites); what is in a favourite folder drags as in the
+    // file tree, and with Option held, natively, as the file explorer's files do.
+    if (!key.startsWith("favorite:")) {
+      this.draggable(row, { kind: "file", file, depth, scope }, `${isFolder ? "folder" : "file"}:${file.path}`, Boolean(this.dragManager));
       this.fileDrag(row, file);
-      this.fileDrop(row, file);
     }
     if (file instanceof TFile && file.extension === "md") this.dropTarget(row, { kind: "note", path: file.path });
     // Notes show their name alone; other files add their kind, as the file explorer does.
@@ -1042,7 +1184,10 @@ export class TaskNavigationView extends ItemView {
     return manager && typeof manager.handleDrag === "function" && typeof manager.handleDrop === "function" ? manager as DragManager : undefined;
   }
 
-  /** Lets `file` be dragged as the file explorer's files are: into a note as a link, onto a tab to open it, or into a folder. */
+  /**
+   * Lets `file` be dragged natively, as the file explorer's files are, while Option (Alt) is held: into a note as a
+   * link, onto a tab to open it, into Canvas or into a folder. Without it, the row drags as the sidebar's others do.
+   */
   private fileDrag(row: HTMLElement, file: TAbstractFile): void {
     const manager = this.dragManager;
     if (!manager || this.renaming?.path === file.path) return;
@@ -1051,35 +1196,150 @@ export class TaskNavigationView extends ItemView {
     // The list stays as it is until the drag ends, wherever it goes: redrawn, the row dragged would be gone.
     row.addEventListener("dragstart", () => {
       this.pressed = false;
-      this.dragging = { group: "files", key: file.path };
+      this.nativeDrag = true;
     });
   }
 
   /**
-   * Lets files and folders, from here or the file explorer, be dropped on `target`'s row: into a folder (the middle of
-   * its row, or anywhere on the Files heading, the vault's top), or before or after a file or folder, which moves them
-   * into its folder at that place and keeps the folder in that order.
+   * Lets files and folders dragged natively (from the file explorer, or from here with Option held) drop anywhere in
+   * the list: the gap opens where they would land, as for the sidebar's own rows, and the rows already here move there.
    */
-  private fileDrop(row: HTMLElement, target: TAbstractFile): void {
-    this.dragManager?.handleDrop(row, (event, draggable, hovering) => {
-      const files = (draggable?.type === "files" ? draggable.files ?? [] : draggable?.type === "file" || draggable?.type === "folder" ? [draggable.file] : [])
-        .filter((file): file is TAbstractFile => file instanceof TFile || file instanceof TFolder);
+  private externalDrop(nav: HTMLElement): void {
+    this.dragManager?.handleDrop(nav, (event, draggable, hovering) => {
+      const files = draggedFiles(draggable);
       if (!files.length) return undefined;
-      const folder = target instanceof TFolder ? target : undefined;
-      const place = folder && (folder.isRoot() || !folder.parent) ? "into" : this.dropPlace(row, event, Boolean(folder), Boolean(folder && this.openFolders.has(folder.path)));
-      // Into the folder, or into the folder `target` is in, beside it.
-      const destination = place === "into" ? folder : target.parent;
-      const moving = !destination ? [] : place === "into" ? files.filter(file => canMoveInto(file, destination))
-        : files.filter(file => file !== target && (file.parent === destination || canMoveInto(file, destination)));
-      // Obsidian marks the row too; kept here as well, as the place changes while over the same row.
-      this.showDropLine(row, hovering && moving.length ? place : undefined);
-      if (!destination || !moving.length) return { action: "", dropEffect: "none" };
-      if (!hovering) void this.whileMoving(() => place === "into" ? this.moveInto(moving, destination) : this.placeFiles(moving, target, place === "after"));
-      const into = `Move into ${destination.isRoot() ? "the vault" : destination.name}`;
-      return place === "into" ? { action: into, dropEffect: "move", hoverEl: row, hoverClass: "is-drop-target" }
-        : { action: moving.every(file => file.parent === destination) ? "Move here" : into, dropEffect: "move", hoverEl: row, hoverClass: `tm-nav-drop-${place}` };
+      const point = { clientX: event.clientX, clientY: event.clientY };
+      const item: NavDragItem = { files, label: files.length > 1 ? `${files.length} files` : files[0].name };
+      if (hovering) {
+        const intent = this.drag.hoverExternal(point, item, this.rowHeight());
+        return intent ? { action: intent.action ?? "", dropEffect: "move", hoverEl: nav, hoverClass: "tm-nav-external-drop" } : { action: "", dropEffect: "none" };
+      }
+      const intent = this.drag.dropExternal(files.map(file => this.treeRows(file)).filter(rows => rows.length));
+      if (!intent?.commit) return { action: "", dropEffect: "none" };
+      void intent.commit();
+      return { action: intent.action ?? "", dropEffect: "move" };
     });
-    row.addEventListener("dragleave", event => { if (!row.contains(event.relatedTarget as Node | null)) this.showDropLine(); });
+  }
+
+  /** How tall a row is, for the gap a drag from elsewhere opens. */
+  private rowHeight(): number {
+    const row = this.listEl?.querySelector<HTMLElement>(".tm-nav-item");
+    return row?.getBoundingClientRect().height || 28;
+  }
+
+  /** `file`'s row in the file tree, and the rows of what is open in it; none when it is not drawn. */
+  private treeRows(file: TAbstractFile): HTMLElement[] {
+    const key = `${file instanceof TFolder ? "folder" : "file"}:${file.path}`;
+    const label = this.filesChildren?.querySelector<HTMLElement>(`[data-tm-nav-key="${CSS.escape(key)}"]`);
+    const row = label?.closest<HTMLElement>(".tm-nav-item");
+    return row ? this.blockOf(row) : [];
+  }
+
+  /**
+   * Where files dragged over `element`, a file's or folder's row (`target`), go. Over a folder's middle, into it (the
+   * gap opening under it, a level in, and a closed folder opening after a moment); over a row's top or bottom, before
+   * or after it in its folder. After the last row of an open folder, moving left takes them out a level at a time.
+   */
+  private fileIntent(element: HTMLElement, target: Extract<NavItem, { kind: "file" }>, files: Array<TFile | TFolder>, point: Point, drag: NavDrag<NavDragItem>): NavIntent {
+    const file = target.file;
+    const folder = file instanceof TFolder ? file : undefined;
+    const open = Boolean(folder && this.openFolders.has(folder.path));
+    const rect = this.drag.rect(element);
+    const y = point.clientY - rect.top;
+    const into = folder && rect.height > 0 && y >= rect.height / 4 && (open || y <= rect.height * 3 / 4);
+    if (folder && into) {
+      const moving = files.filter(item => canMoveInto(item, folder));
+      if (!moving.length) return drag.home;
+      return {
+        gap: { element, where: "after", depth: target.depth + 1 }, highlight: element, moves: true, land: open ? "gap" : "hide",
+        action: `Move into ${folder.name}`, spring: open ? undefined : () => this.springOpen(element, folder, target.depth, target.scope),
+        commit: () => this.whileMoving(() => this.moveInto(moving, folder))
+      };
+    }
+    const after = folder ? y > rect.height / 2 : this.afterHalf(element, point);
+    if (!after) return this.fileBeside(element, file, files, false, target.depth, drag);
+    // After it, as deep as it is, or (after the last of a folder's rows) as far out as the row below, moving left.
+    const next = this.rowAfter(element);
+    const least = target.scope === "favorites" ? 1 : 0;
+    const shallowest = Math.max(least, next ? Math.min(depthOf(next), target.depth) : least);
+    const at = (x: number): NavIntent => {
+      const dx = x - drag.x;
+      const depth = Math.max(shallowest, target.depth - (dx <= -OUTDENT_PX ? Math.max(1, Math.floor(-dx / NEST_PX)) : 0));
+      let anchor: TAbstractFile = file;
+      for (let level = target.depth; level > depth && anchor.parent; level--) anchor = anchor.parent;
+      return { ...this.fileBeside(element, anchor, files, true, depth, drag), side: { row: element, after: true } };
+    };
+    return { ...at(point.clientX), sideways: at };
+  }
+
+  /** Files placed just before or after `anchor` in its folder, the gap beside `row` at `depth`. */
+  private fileBeside(row: HTMLElement, anchor: TAbstractFile, files: Array<TFile | TFolder>, after: boolean, depth: number, drag: NavDrag<NavDragItem>): NavIntent {
+    const destination = anchor.parent;
+    const moving = destination ? files.filter(item => item !== anchor && (item.parent === destination || canMoveInto(item, destination))) : [];
+    if (!destination || !moving.length) return drag.home;
+    const into = `Move into ${destination.isRoot() ? "the vault" : destination.name}`;
+    return {
+      gap: after ? { element: row, where: "after", depth } : { element: row, where: "before", depth }, moves: true, side: { row, after },
+      action: moving.every(item => item.parent === destination) ? "Move here" : into,
+      commit: () => this.whileMoving(() => this.placeFiles(moving, anchor, after))
+    };
+  }
+
+  /**
+   * Opens `folder` (its row `row`, `depth` deep) mid-drag, as the file explorer does when a file rests on it: its rows
+   * are drawn under it (after the gap, which stays where it is), and the list is drawn again once the drag ends.
+   */
+  private springOpen(row: HTMLElement, folder: TFolder, depth: number, scope: FileScope): void {
+    if (this.openFolders.has(folder.path)) return;
+    this.openFolders.add(folder.path);
+    this.app.workspace.requestSaveLayout();
+    const holder = createDiv();
+    this.renderFolder(holder, folder, depth + 1, scope);
+    const gap = row.nextElementSibling?.classList.contains("tm-drop-gap") ? row.nextElementSibling : row;
+    gap.after(...Array.from(holder.children));
+    const glyph = row.querySelector<HTMLElement>(".tm-nav-icon");
+    if (glyph) navIcon(glyph, "folder-open");
+    row.querySelector(".tm-nav-label")?.setAttribute("aria-expanded", "true");
+    const chevron = row.querySelector<HTMLElement>(".tm-nav-collapse");
+    if (chevron) {
+      navIcon(chevron, "chevron-down");
+      chevron.setAttribute("aria-expanded", "true");
+      chevron.setAttribute("aria-label", `Collapse ${folder.name}`);
+    }
+    this.pendingRender = true;
+  }
+
+  /**
+   * Files let go outside the sidebar: onto a note, a link to each where they are let go (an embed for other files), as
+   * the file explorer drops them; onto a folder in the file explorer (or a file in it), into that folder.
+   */
+  private dropOutside(point: Point, item: NavDragItem): boolean {
+    const files = item.files ?? [];
+    if (!files.length) return false;
+    const element = this.containerEl.ownerDocument.elementFromPoint(point.clientX, point.clientY);
+    if (!element) return false;
+    const editor = element.closest<HTMLElement>(".cm-editor");
+    if (editor) {
+      const view = EditorView.findFromDOM(editor);
+      const notes = files.filter((file): file is TFile => file instanceof TFile);
+      if (!view || !notes.length) return false;
+      const host = this.app.workspace.getLeavesOfType("markdown").map(leaf => leaf.view as unknown as { containerEl?: HTMLElement; file?: TFile | null })
+        .find(markdown => markdown.containerEl?.contains(editor));
+      const source = host?.file?.path ?? "";
+      const text = notes.map(file => `${file.extension === "md" ? "" : "!"}${this.app.fileManager.generateMarkdownLink(file, source)}`).join(" ");
+      const at = view.posAtCoords({ x: point.clientX, y: point.clientY }) ?? view.state.selection.main.head;
+      view.dispatch({ changes: { from: at, insert: text }, selection: { anchor: at + text.length } });
+      view.focus();
+      return true;
+    }
+    const entry = element.closest<HTMLElement>(".nav-folder-title[data-path], .nav-file-title[data-path]");
+    if (!entry || this.containerEl.contains(entry)) return false;
+    const found = this.app.vault.getAbstractFileByPath(entry.getAttribute("data-path") ?? "");
+    const folder = found instanceof TFolder ? found : found?.parent;
+    const moving = folder ? files.filter(file => canMoveInto(file, folder)) : [];
+    if (!folder || !moving.length) return false;
+    void this.whileMoving(() => this.moveInto(moving, folder));
+    return true;
   }
 
   /**
@@ -1093,7 +1353,12 @@ export class TaskNavigationView extends ItemView {
     finally {
       this.moving--;
       this.pendingRender = true;
-      if (!this.moving) this.resumeRender();
+      // The rows already show where the files went; the list is drawn again once the index and the vault, busy
+      // with the notes whose links Obsidian rewrites, have paused.
+      if (!this.moving) {
+        this.burstUntil = Date.now() + BURST_MAX_MS;
+        this.scheduleSettledRender();
+      }
     }
   }
 

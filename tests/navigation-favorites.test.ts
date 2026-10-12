@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
-import { beforeAll, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { installObsidianDom } from "./helpers/obsidian-dom";
+import { gap, gapPlace, grab, layOutSidebar, middleOf } from "./helpers/nav-drag";
 
 const menus: Array<{ titles: string[]; click(title: string): void }> = [];
 vi.mock("obsidian", async importOriginal => {
@@ -28,6 +29,8 @@ import { DEFAULT_SETTINGS, type Project } from "../src/types";
 import type TaskManagerPlugin from "../src/main";
 
 beforeAll(() => installObsidianDom());
+beforeEach(() => layOutSidebar());
+afterEach(() => { vi.restoreAllMocks(); document.body.empty(); });
 
 const project = (name: string, parent?: string): Project => ({ path: `${name}.md`, name, openTasks: 1, completedTasks: 0, ...parent ? { parentPath: `${parent}.md` } : {} });
 
@@ -104,32 +107,6 @@ const rightClick = (row: HTMLElement) => {
   return menus[menus.length - 1];
 };
 
-/**
- * Drags `source` onto `target`, in its top half (`before`) or its bottom half, `dx` px right (or left) of where the drag
- * began; returns whether `target` took it, and the depth its line showed.
- */
-function dragTo(source: HTMLElement, target: HTMLElement, before: boolean, dx = 0): { taken: boolean; depth: string } {
-  const dataTransfer = { setData: vi.fn(), types: [] as string[], effectAllowed: "", dropEffect: "" };
-  const event = (type: string, x = 100) => {
-    const made = new Event(type, { bubbles: true, cancelable: true });
-    Object.defineProperties(made, { dataTransfer: { value: dataTransfer }, clientY: { value: before ? 2 : 18 }, clientX: { value: x } });
-    return made;
-  };
-  target.getBoundingClientRect = () => ({ top: 0, height: 20 }) as DOMRect;
-  source.dispatchEvent(event("dragstart"));
-  expect(dataTransfer.setData).toHaveBeenCalledWith("application/x-task-manager-nav-item", expect.any(String));
-  const over = event("dragover", 100 + dx);
-  target.dispatchEvent(over);
-  // The line shows on the row it is over, or (over a project's own rows) on the project where it is.
-  const marked = target.closest(".tm-navigation")?.querySelector<HTMLElement>(".tm-nav-drop-before, .tm-nav-drop-after");
-  if (over.defaultPrevented && marked === target) expect(marked.classList.contains(before ? "tm-nav-drop-before" : "tm-nav-drop-after")).toBe(true);
-  const depth = marked?.style.getPropertyValue("--tm-nav-drop-depth") ?? "";
-  target.dispatchEvent(event("drop", 100 + dx));
-  source.dispatchEvent(event("dragend"));
-  return { taken: over.defaultPrevented, depth };
-}
-const drag = (source: HTMLElement, target: HTMLElement, before: boolean): boolean => dragTo(source, target, before).taken;
-
 it("puts Favorites at the top, filled from any item's right-click menu", async () => {
   const { container, row, favoriteLabels, plugin, settings } = setup();
   const first = container.querySelector(".tm-nav-list > .tm-nav-group")!;
@@ -172,55 +149,101 @@ it("shows favourites as their own sections do, leaving out what is gone", async 
   expect(plugin.openProjectMenu).toHaveBeenCalledWith("Site.md", expect.any(HTMLElement), { x: 12, y: 34 });
 });
 
-it("reorders favourites, smart lists, a parent's subprojects and tags by dragging, each among its own", () => {
+it("reorders favourites, smart lists, a parent's subprojects and tags by dragging, each among its own", async () => {
   const { row, favoriteLabels, sectionLabels, settings, plugin, container } = setup(["mode:today", "mode:inbox", "tag:errand"]);
-  expect(drag(row("favorite:tag:errand")!, row("favorite:mode:today")!, true)).toBe(true);
-  expect(settings.favorites).toEqual(["tag:errand", "mode:today", "mode:inbox"]);
+  // Lifted, the row folds away and the gap takes its place; over the top half of Today, the gap opens above it.
+  const errand = grab(row("favorite:tag:errand")!);
+  expect(row("favorite:tag:errand")!.classList.contains("tm-drag-source")).toBe(true);
+  expect(gapPlace()).toEqual({ above: "Inbox", depth: "0" });
+  errand.to(row("favorite:mode:today")!, 4);
+  expect(gapPlace()).toEqual({ above: null, depth: "0" });
+  errand.drop();
+  await vi.waitFor(() => expect(settings.favorites).toEqual(["tag:errand", "mode:today", "mode:inbox"]));
   expect(favoriteLabels()).toEqual(["errand", "Today", "Inbox"]);
   expect(plugin.saveSettings).toHaveBeenCalledTimes(1);
-  // A favourite stays among the favourites.
-  expect(drag(row("favorite:mode:inbox")!, row("tag:home")!, true)).toBe(false);
+  // A favourite stays among the favourites: over another section its gap goes back to its own place.
+  const inbox = grab(row("favorite:mode:inbox")!).to(row("tag:home")!, 4);
+  expect(gapPlace()).toEqual({ above: "Today", depth: "0" });
+  inbox.drop();
+  await vi.waitFor(() => expect(gap()).toBeNull());
+  expect(settings.favorites).toEqual(["tag:errand", "mode:today", "mode:inbox"]);
+  expect(plugin.saveSettings).toHaveBeenCalledTimes(1);
 
-  expect(drag(row("list:errands")!, row("list:calls")!, true)).toBe(true);
-  expect(settings.smartLists.map(list => list.id)).toEqual(["errands", "calls"]);
+  grab(row("list:errands")!).to(row("list:calls")!, 4).drop();
+  await vi.waitFor(() => expect(settings.smartLists.map(list => list.id)).toEqual(["errands", "calls"]));
 
   const projects = () => Array.from(sectionLabels(1)).map(label => label.textContent);
   expect(projects()).toEqual(["Home", "Work", "Ads", "Site"]);
-  expect(drag(row("project:Site.md")!, row("project:Ads.md")!, true)).toBe(true);
-  expect(projects()).toEqual(["Home", "Work", "Site", "Ads"]);
-  // A parent takes its subprojects along.
-  expect(drag(row("project:Work.md")!, row("project:Home.md")!, true)).toBe(true);
-  expect(projects()).toEqual(["Work", "Site", "Ads", "Home"]);
+  grab(row("project:Site.md")!).to(row("project:Ads.md")!, 4).drop();
+  await vi.waitFor(() => expect(projects()).toEqual(["Home", "Work", "Site", "Ads"]));
+  // A parent takes its subprojects along: they fold away with it.
+  const work = grab(row("project:Work.md")!);
+  expect(["Work.md", "Site.md", "Ads.md"].map(path => row(`project:${path}`)!.classList.contains("tm-drag-source"))).toEqual([true, true, true]);
+  work.to(row("project:Home.md")!, 4).drop();
+  await vi.waitFor(() => expect(projects()).toEqual(["Work", "Site", "Ads", "Home"]));
   expect(settings.navOrder.projects).toEqual(["Work.md", "Site.md", "Ads.md", "Home.md"]);
   expect(plugin.updateProject).not.toHaveBeenCalled();
 
   const tags = () => Array.from(sectionLabels(2)).map(label => label.textContent);
-  expect(drag(row("tag:errand")!, row("tag:home")!, false)).toBe(true);
-  expect(tags()).toEqual(["home", "errand"]);
+  grab(row("tag:errand")!).to(row("tag:home")!, 16).drop();
+  await vi.waitFor(() => expect(tags()).toEqual(["home", "errand"]));
   expect(settings.navOrder.tags).toEqual(["home", "errand"]);
-  expect(container.querySelector(".tm-nav-drop-before, .tm-nav-drop-after, .is-being-dragged")).toBeNull();
+  expect(container.querySelector(".tm-drop-gap, .tm-drag-source, .is-being-dragged, .is-drop-target")).toBeNull();
+  expect(document.querySelector(".tm-drag-preview")).toBeNull();
+});
+
+it("lifts the row and lets the rows around it make room, and Escape puts it back", async () => {
+  const { row, settings } = setup(["mode:today", "mode:inbox", "tag:errand"]);
+  const inbox = row("favorite:mode:inbox")!;
+  const today = row("favorite:mode:today")!;
+  const top = today.getBoundingClientRect().top;
+  const drag = grab(row("favorite:tag:errand")!);
+  // A copy follows the pointer; its row's slot is the gap, so nothing moves yet.
+  const copy = document.querySelector<HTMLElement>(".tm-nav-drag-layer .tm-drag-preview")!;
+  expect(copy.textContent).toContain("errand");
+  expect(document.body.classList.contains("tm-list-dragging")).toBe(true);
+  expect(inbox.getBoundingClientRect().top).toBe(top + 20);
+  // Above Today, the gap opens there: Today and Inbox move down a row to make room.
+  drag.to(today, 4);
+  expect([today.getBoundingClientRect().top, inbox.getBoundingClientRect().top]).toEqual([top + 20, top + 40]);
+  expect(gap()!.style.getPropertyValue("--tm-gap-height")).toBe("20px");
+  drag.escape();
+  await vi.waitFor(() => expect(gap()).toBeNull());
+  expect(document.querySelector(".tm-drag-preview")).toBeNull();
+  expect(document.body.classList.contains("tm-list-dragging")).toBe(false);
+  expect(row("favorite:tag:errand")!.classList.contains("tm-drag-source")).toBe(false);
+  expect(row("favorite:tag:errand")!.style.height).toBe("");
+  expect(settings.favorites).toEqual(["mode:today", "mode:inbox", "tag:errand"]);
 });
 
 it("nests a project under the one above when dragged right, and takes it out when dragged left, as tasks do", async () => {
   const { row, sectionLabels, settings, plugin } = setup();
   const tree = () => Array.from(sectionLabels(1)).map(label => `${"-".repeat(Number(label.closest<HTMLElement>(".tm-nav-item")!.style.getPropertyValue("--tm-nav-depth")))}${label.textContent}`);
   expect(tree()).toEqual(["Home", "Work", "-Ads", "-Site"]);
-  // Right, where it is: under the project above it.
-  expect(dragTo(row("project:Site.md")!, row("project:Site.md")!, true, 30)).toEqual({ taken: true, depth: "2" });
+  // Right, where it is: under the project above it; the gap slides in a level.
+  let drag = grab(row("project:Site.md")!).to(gap()!, 10, 30);
+  expect(gapPlace()).toEqual({ above: "Ads", depth: "2" });
+  drag.drop();
   await vi.waitFor(() => expect(tree()).toEqual(["Home", "Work", "-Ads", "--Site"]));
   expect(plugin.updateProject).toHaveBeenLastCalledWith("Site.md", expect.any(Function));
   // Left, where it is: out from under its parent, a level per step, after the project it was under.
-  expect(dragTo(row("project:Site.md")!, row("project:Site.md")!, true, -20).depth).toBe("1");
+  drag = grab(row("project:Site.md")!).to(gap()!, 10, -20);
+  expect(gapPlace()!.depth).toBe("1");
+  drag.drop();
   await vi.waitFor(() => expect(tree()).toEqual(["Home", "Work", "-Ads", "-Site"]));
-  expect(dragTo(row("project:Ads.md")!, row("project:Ads.md")!, true, -40).depth).toBe("0");
+  drag = grab(row("project:Ads.md")!).to(gap()!, 10, -40);
+  expect(gapPlace()!.depth).toBe("0");
+  drag.drop();
   await vi.waitFor(() => expect(tree()).toEqual(["Home", "Work", "-Site", "Ads"]));
-  // Below a nested project it goes beside it; dragged right, under it; a top project can't nest with nothing above it.
-  expect(dragTo(row("project:Home.md")!, row("project:Site.md")!, false).depth).toBe("1");
+  // Below a nested project it goes beside it; a top project can't nest with nothing above it.
+  drag = grab(row("project:Home.md")!).to(row("project:Site.md")!, 16);
+  expect(gapPlace()).toEqual({ above: "Site", depth: "1" });
+  drag.drop();
   await vi.waitFor(() => expect(tree()).toEqual(["Work", "-Site", "-Home", "Ads"]));
-  expect(dragTo(row("project:Work.md")!, row("project:Work.md")!, true, 50).depth).toBe("0");
-  expect(tree()).toEqual(["Work", "-Site", "-Home", "Ads"]);
-  // Not into its own subprojects: over them it stays where it is.
-  expect(dragTo(row("project:Work.md")!, row("project:Home.md")!, false, 30)).toEqual({ taken: true, depth: "0" });
+  drag = grab(row("project:Work.md")!).to(gap()!, 10, 50);
+  expect(gapPlace()!.depth).toBe("0");
+  drag.drop();
+  await vi.waitFor(() => expect(gap()).toBeNull());
   expect(tree()).toEqual(["Work", "-Site", "-Home", "Ads"]);
   expect(settings.navOrder.projects).toEqual(["Work.md", "Site.md", "Home.md", "Ads.md"]);
   expect(plugin.updateProject).toHaveBeenCalledTimes(4);
@@ -229,32 +252,49 @@ it("nests a project under the one above when dragged right, and takes it out whe
 it("adds what is dropped into Favorites: on its heading at the end, beside a favourite, or on the empty list", async () => {
   const { row, container, favoriteLabels, settings, app, byPath } = setup();
   const hint = container.querySelector<HTMLElement>(".tm-nav-favorites .tm-nav-empty")!;
-  // A list keeps its place in the lists, but drops into Favorites.
-  expect(dragTo(row("mode:today")!, hint, false).taken).toBe(true);
-  expect(settings.favorites).toEqual(["mode:today"]);
+  // A list keeps its place in the lists, faded while it is dragged, and drops into Favorites.
+  const today = row("mode:today")!;
+  const drag = grab(today);
+  expect(today.classList.contains("is-being-dragged")).toBe(true);
+  expect(today.classList.contains("tm-drag-source")).toBe(false);
+  expect(gap()).toBeNull();
+  drag.to(hint).drop();
+  await vi.waitFor(() => expect(settings.favorites).toEqual(["mode:today"]));
   expect(favoriteLabels()).toEqual(["Today"]);
-  expect(drag(row("tag:home")!, row("favorites")!, false)).toBe(true);
-  expect(settings.favorites).toEqual(["mode:today", "tag:home"]);
+  expect(row("mode:today")).not.toBeNull();
+  // On the heading, at the end, the heading lit up.
+  const home = grab(row("tag:home")!).to(row("favorites")!);
+  expect(row("favorites")!.classList.contains("is-drop-target")).toBe(true);
+  expect(gapPlace()).toEqual({ above: "Today", depth: "0" });
+  home.drop();
+  await vi.waitFor(() => expect(settings.favorites).toEqual(["mode:today", "tag:home"]));
   // Beside a favourite, before or after it.
-  expect(drag(row("project:Site.md")!, row("favorite:tag:home")!, true)).toBe(true);
-  expect(drag(row("list:errands")!, row("favorite:mode:today")!, false)).toBe(true);
-  expect(favoriteLabels()).toEqual(["Today", "Errands", "Site", "home"]);
+  grab(row("project:Site.md")!).to(row("favorite:tag:home")!, 4).drop();
+  await vi.waitFor(() => expect(settings.favorites).toEqual(["mode:today", "project:Site.md", "tag:home"]));
+  grab(row("list:errands")!).to(row("favorite:mode:today")!, 16).drop();
+  await vi.waitFor(() => expect(favoriteLabels()).toEqual(["Today", "Errands", "Site", "home"]));
   // A favourite dropped on the heading moves to the end.
-  expect(drag(row("favorite:mode:today")!, row("favorites")!, false)).toBe(true);
-  expect(settings.favorites).toEqual(["list:errands", "project:Site.md", "tag:home", "mode:today"]);
-  expect(container.querySelector(".is-drop-target, .tm-nav-drop-before, .tm-nav-drop-after")).toBeNull();
-  // Files and folders, from the file tree or the file explorer, drop in through Obsidian's drag manager.
-  const drops = app.dragManager.drops;
-  const heading = row("favorites")!;
-  expect(drops.get(heading)!({} as DragEvent, { type: "folder", file: byPath.get("Work") }, true)).toMatchObject({ action: "Add to favorites", hoverClass: "is-drop-target" });
-  expect(heading.classList.contains("is-drop-target")).toBe(true);
-  drops.get(heading)!({} as DragEvent, { type: "folder", file: byPath.get("Work") }, false);
-  const beside = row("favorite:list:errands")!;
-  beside.getBoundingClientRect = () => ({ top: 0, height: 20 }) as DOMRect;
-  drops.get(beside)!({ clientY: 2 } as DragEvent, { type: "file", file: byPath.get("Notes.md") }, false);
+  grab(row("favorite:mode:today")!).to(row("favorites")!).drop();
+  await vi.waitFor(() => expect(settings.favorites).toEqual(["list:errands", "project:Site.md", "tag:home", "mode:today"]));
+  expect(container.querySelector(".is-drop-target, .tm-drop-gap, .is-being-dragged")).toBeNull();
+  // Files and folders from the file explorer drop in through Obsidian's drag manager, anywhere in the list: the gap
+  // opens where they go, as for the sidebar's own rows.
+  const list = () => container.querySelector<HTMLElement>(".tm-nav-list")!;
+  const over = (target: HTMLElement, at: number) => ({ clientX: 100, clientY: target.getBoundingClientRect().top + at }) as DragEvent;
+  const drop = () => app.dragManager.drops.get(list())!;
+  expect(drop()(over(row("favorites")!, 10), { type: "folder", file: byPath.get("Work") }, true)).toMatchObject({ action: "Add to favorites", dropEffect: "move" });
+  expect(row("favorites")!.classList.contains("is-drop-target")).toBe(true);
+  expect(gapPlace()).toEqual({ above: "Today", depth: "0" });
+  drop()(over(row("favorites")!, 10), { type: "folder", file: byPath.get("Work") }, false);
+  await vi.waitFor(() => expect(settings.favorites).toEqual(["list:errands", "project:Site.md", "tag:home", "mode:today", "folder:Work"]));
+  drop()(over(row("favorite:list:errands")!, 4), { type: "file", file: byPath.get("Notes.md") }, true);
+  expect(gapPlace()).toEqual({ above: null, depth: "0" });
+  drop()(over(row("favorite:list:errands")!, 4), { type: "file", file: byPath.get("Notes.md") }, false);
   await vi.waitFor(() => expect(settings.favorites).toEqual(["file:Notes.md", "list:errands", "project:Site.md", "tag:home", "mode:today", "folder:Work"]));
+  expect(gap()).toBeNull();
   // What is not a file (a task, say) is left to other targets.
-  expect(drops.get(row("favorites")!)!({} as DragEvent, null, true)).toBeUndefined();
+  expect(drop()(over(row("favorites")!, 10), null, true)).toBeUndefined();
+  expect(middleOf(row("favorites")!)).toBeGreaterThan(0);
 });
 
 it("folds the tags from the Tags heading, which no longer opens a list of tags", () => {
