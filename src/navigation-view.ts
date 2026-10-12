@@ -89,6 +89,13 @@ const NAV_MODES = new Set<TaskViewMode>([...NAV_GROUPS.flat().map(entry => entry
 interface NavItemOptions { icon?: string; color?: string; count?: number; expanded?: boolean }
 /** Where a dragged item goes: before or after the row it is over, or (a folder's middle) into it. */
 type DropPlace = "before" | "after" | "into";
+/** A project's row in the sidebar's tree, as drawn: how deep it is, and the project it shows under ("" for none). */
+interface NavProjectRow { path: string; depth: number; parent: string; row: HTMLElement }
+/** Where a dragged project goes: its line (before or after a row, as deep as it will be), its parent and the project it follows. */
+interface ProjectDrop { row: HTMLElement; place: "before" | "after"; depth: number; parent: string; after?: string }
+/** Dragging a project this far right (a level per this much) puts it under the project above; left, out from under its parent. */
+const NEST_PX = 24;
+const OUTDENT_PX = 16;
 /** Where in the sidebar a file row is: the Files tree, or Favorites (a favourite folder's files). Renaming happens in one. */
 type FileScope = "files" | "favorites";
 /** The type a sidebar item drags with while it moves to a new place: its own, so it drops nowhere else (not into a note as text). */
@@ -121,7 +128,7 @@ export class TaskNavigationView extends ItemView {
   private releaseTimer?: number;
   private closed = false;
   /** The item being dragged to a new place, and the rows it can go among (see sortable); the list waits for the drop. */
-  private dragging?: { group: string; key: string };
+  private dragging?: { group: string; key: string; x?: number };
   // The toolbar is one tab stop; arrow keys move between its buttons.
   private toolbarFocus = 0;
   constructor(leaf: WorkspaceLeaf, private readonly plugin: TaskManagerPlugin) { super(leaf); }
@@ -309,19 +316,18 @@ export class TaskNavigationView extends ItemView {
         const tree = projectHierarchy(projects, this.settings.navOrder?.projects);
         // Subprojects sit under their parent, indented a step per level; a parent folds them away from its chevron.
         let hiddenBelow: number | undefined;
-        // The project each level is under, so a project drags among its parent's subprojects.
+        // The project each level is under, and the rows as drawn, which projects drag among.
         const parents: string[] = [];
+        const rows: NavProjectRow[] = [];
         tree.forEach(({ project, depth }, index) => {
           parents[depth] = project.path;
           if (hiddenBelow !== undefined && depth > hiddenBelow) return;
           hiddenBelow = undefined;
           const row = this.projectRow(children, project, `project:${project.path}`);
           row.style.setProperty("--tm-nav-depth", String(depth));
-          this.sortable(row, `projects:${depth ? parents[depth - 1] : ""}`, project.path, (path, target, after) => this.saveOrder(() => {
-            // Kept as the tree then reads, parents before their subprojects.
-            const order = moveKey(tree.map(entry => entry.project.path), path, target, after);
-            this.settings.navOrder = { ...this.settings.navOrder, projects: projectHierarchy(projects, order).map(entry => entry.project.path) };
-          }));
+          const drawn: NavProjectRow = { path: project.path, depth, parent: depth ? parents[depth - 1] : "", row };
+          rows.push(drawn);
+          this.projectDrag(drawn, rows, (dragged, drop) => this.placeProject(projects, tree.map(entry => entry.project.path), dragged, drop));
           if ((tree[index + 1]?.depth ?? 0) <= depth) return;
           const folded = this.foldedProjects.has(project.path);
           this.chevron(row, !folded, project.name, `collapse:project:${project.path}`, () => {
@@ -576,15 +582,132 @@ export class TaskNavigationView extends ItemView {
     return y < rect.height / 4 ? "before" : y > rect.height * 3 / 4 && !open ? "after" : "into";
   }
 
-  /** The line where a dragged item goes, on `row` (none: taken away). */
-  private showDropLine(row?: HTMLElement, place?: DropPlace): void {
+  /** The line where a dragged item goes, on `row` (none: taken away), indented to `depth` when it says how deep it goes. */
+  private showDropLine(row?: HTMLElement, place?: DropPlace, depth?: number): void {
     const container = this.containerEl.children[1] as HTMLElement | undefined;
-    for (const marked of Array.from(container?.querySelectorAll?.(".tm-nav-drop-before, .tm-nav-drop-after") ?? [])) {
-      if (marked !== row || place === "into") marked.classList.remove("tm-nav-drop-before", "tm-nav-drop-after");
+    for (const marked of Array.from(container?.querySelectorAll?.<HTMLElement>(".tm-nav-drop-before, .tm-nav-drop-after") ?? [])) {
+      if (marked === row && place !== "into") continue;
+      marked.classList.remove("tm-nav-drop-before", "tm-nav-drop-after");
+      marked.style.removeProperty("--tm-nav-drop-depth");
     }
     if (!row || !place || place === "into") return;
     row.classList.toggle("tm-nav-drop-before", place === "before");
     row.classList.toggle("tm-nav-drop-after", place === "after");
+    if (depth === undefined) row.style.removeProperty("--tm-nav-drop-depth");
+    else row.style.setProperty("--tm-nav-drop-depth", String(depth));
+  }
+
+  /**
+   * Lets a project in the Projects section drag as a task does in a list: up or down to a new place among the
+   * projects, right (a level per 24px) to go under the project above, left to come out from under its parent. Its
+   * subprojects go with it.
+   */
+  private projectDrag(drawn: NavProjectRow, rows: NavProjectRow[], place: (dragged: NavProjectRow, drop: ProjectDrop) => Promise<void>): void {
+    const { row } = drawn;
+    row.setAttribute("draggable", "true");
+    row.addEventListener("dragstart", event => {
+      if (!event.dataTransfer) return;
+      this.pressed = false;
+      this.dragging = { group: "projects", key: drawn.path, x: event.clientX };
+      event.dataTransfer.setData(NAV_DRAG_TYPE, drawn.path);
+      event.dataTransfer.effectAllowed = "move";
+      for (const moving of this.projectBlock(rows, drawn)) moving.row.addClass("is-being-dragged");
+    });
+    const dropAt = (event: DragEvent): { dragged: NavProjectRow; drop: ProjectDrop } | undefined => {
+      const drag = this.dragging;
+      const dragged = drag?.group === "projects" ? rows.find(item => item.path === drag.key) : undefined;
+      const drop = dragged && this.projectDrop(rows, drawn, dragged, event, drag?.x ?? event.clientX);
+      return dragged && drop ? { dragged, drop } : undefined;
+    };
+    row.addEventListener("dragover", event => {
+      const found = dropAt(event);
+      if (!found) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+      this.showDropLine(found.drop.row, found.drop.place, found.drop.depth);
+    });
+    row.addEventListener("dragleave", event => { if (!row.contains(event.relatedTarget as Node | null)) this.showDropLine(); });
+    row.addEventListener("drop", event => {
+      const found = dropAt(event);
+      if (!found) return;
+      event.preventDefault();
+      this.endDrag();
+      void place(found.dragged, found.drop).catch(error => new Notice(String(error)));
+    });
+  }
+
+  /** `project`'s row and the rows of its subprojects below it, which drag along with it. */
+  private projectBlock(rows: NavProjectRow[], project: NavProjectRow): NavProjectRow[] {
+    const start = rows.indexOf(project);
+    let end = start + 1;
+    while (end < rows.length && rows[end].depth > project.depth) end++;
+    return rows.slice(start, end);
+  }
+
+  /**
+   * Where `dragged`, over `target`, goes. Above or below `target` by the pointer's height (over its own rows, where it
+   * is), at the depth of the projects there; moving right of where the drag began goes a level deeper per 24px, under
+   * the project above, and moving left comes out a level per 24px (from 16px), as far as the top. Its parent is then
+   * the project above at the level over it, and it follows that project's sibling at its own level.
+   */
+  private projectDrop(rows: NavProjectRow[], target: NavProjectRow, dragged: NavProjectRow, event: DragEvent, startX: number): ProjectDrop | undefined {
+    const block = this.projectBlock(rows, dragged);
+    if (!block.length) return undefined;
+    const others = rows.filter(item => !block.includes(item));
+    let above: NavProjectRow | undefined;
+    let line: Pick<ProjectDrop, "row" | "place">;
+    let natural: number;
+    if (block.includes(target)) {
+      above = others[rows.indexOf(dragged) - 1];
+      line = { row: dragged.row, place: "before" };
+      natural = dragged.depth;
+    } else {
+      const rect = target.row.getBoundingClientRect();
+      const before = rect.height > 0 && event.clientY - rect.top < rect.height / 2;
+      const index = others.indexOf(target);
+      above = before ? others[index - 1] : target;
+      const below = before ? target : others[index + 1];
+      line = { row: target.row, place: before ? "before" : "after" };
+      // Below a project with its subprojects open, it goes first among them.
+      natural = !before && below && below.depth > target.depth ? below.depth : target.depth;
+    }
+    const dx = event.clientX - startX;
+    const shift = dx >= NEST_PX ? Math.floor(dx / NEST_PX) : dx <= -OUTDENT_PX ? -Math.max(1, Math.floor(-dx / NEST_PX)) : 0;
+    const depth = Math.max(0, Math.min(natural + shift, above ? above.depth + 1 : 0));
+    if (!above) return { ...line, depth: 0, parent: "" };
+    if (depth === above.depth + 1) return { ...line, depth, parent: above.path, after: above.path };
+    // The project above, or the one it is under, at that depth: it follows that one, beside it.
+    let index = others.indexOf(above);
+    while (index > 0 && others[index].depth > depth) index--;
+    const beside = others[index];
+    return { ...line, depth, parent: beside.parent, after: beside.path };
+  }
+
+  /**
+   * Puts a dragged project (with its subprojects) where `drop` says: after `drop.after` in the sidebar's order (first
+   * when none), and under `drop.parent`, writing its parent when that changed.
+   */
+  private async placeProject(projects: Project[], order: string[], dragged: NavProjectRow, drop: ProjectDrop): Promise<void> {
+    const paths = order.filter(path => path !== dragged.path);
+    paths.splice(drop.after ? paths.indexOf(drop.after) + 1 : 0, 0, dragged.path);
+    const reparented = drop.parent === dragged.parent ? projects
+      : projects.map(project => project.path === dragged.path ? { ...project, parentPath: drop.parent || undefined } : project);
+    // Kept as the tree then reads, parents before their subprojects.
+    const next = projectHierarchy(reparented, paths).map(entry => entry.project.path);
+    const previous = this.settings.navOrder;
+    if (drop.parent === dragged.parent && next.join("\n") === order.join("\n")) return;
+    this.settings.navOrder = { ...previous, projects: next };
+    if (drop.parent !== dragged.parent) {
+      try { await this.plugin.updateProject(dragged.path, draft => ({ ...draft, parent: drop.parent })); }
+      catch (cause) {
+        this.settings.navOrder = previous;
+        this.render();
+        new Notice(cause instanceof Error ? cause.message : "Could not move the project.");
+        return;
+      }
+    }
+    this.render();
+    await this.plugin.saveSettings();
   }
 
   /** A drag is over (a drag is no press either): its line goes, and a redraw that waited for it happens. */

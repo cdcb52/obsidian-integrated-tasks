@@ -71,7 +71,14 @@ function setup(favorites: string[] = []) {
       settings.favorites = settings.favorites.includes(key) ? settings.favorites.filter(item => item !== key) : [...settings.favorites, key];
       view.refresh();
     }),
-    openTaskView: vi.fn(async () => {}), openProject: vi.fn(async () => {}), openTag: vi.fn(async () => {}), openProjectMenu: vi.fn()
+    openTaskView: vi.fn(async () => {}), openProject: vi.fn(async () => {}), openTag: vi.fn(async () => {}), openProjectMenu: vi.fn(),
+    // Moves the project under its new parent, as the index then reads it.
+    updateProject: vi.fn(async (path: string, change: (draft: { parent: string }) => { parent: string }) => {
+      const parent = change({ parent: "" }).parent;
+      const index = projects.findIndex(item => item.path === path);
+      projects[index] = { ...projects[index], parentPath: parent || undefined };
+      return path;
+    })
   };
   view = new TaskNavigationView({ app } as unknown as WorkspaceLeaf, plugin as unknown as TaskManagerPlugin);
   // Tags start folded; open them.
@@ -90,24 +97,31 @@ const rightClick = (row: HTMLElement) => {
   return menus[menus.length - 1];
 };
 
-/** Drags `source` onto `target`, in its top half (`before`) or its bottom half; returns whether `target` took it. */
-function drag(source: HTMLElement, target: HTMLElement, before: boolean): boolean {
+/**
+ * Drags `source` onto `target`, in its top half (`before`) or its bottom half, `dx` px right (or left) of where the drag
+ * began; returns whether `target` took it, and the depth its line showed.
+ */
+function dragTo(source: HTMLElement, target: HTMLElement, before: boolean, dx = 0): { taken: boolean; depth: string } {
   const dataTransfer = { setData: vi.fn(), types: [] as string[], effectAllowed: "", dropEffect: "" };
-  const event = (type: string) => {
+  const event = (type: string, x = 100) => {
     const made = new Event(type, { bubbles: true, cancelable: true });
-    Object.defineProperties(made, { dataTransfer: { value: dataTransfer }, clientY: { value: before ? 2 : 18 } });
+    Object.defineProperties(made, { dataTransfer: { value: dataTransfer }, clientY: { value: before ? 2 : 18 }, clientX: { value: x } });
     return made;
   };
   target.getBoundingClientRect = () => ({ top: 0, height: 20 }) as DOMRect;
   source.dispatchEvent(event("dragstart"));
   expect(dataTransfer.setData).toHaveBeenCalledWith("application/x-task-manager-nav-item", expect.any(String));
-  const over = event("dragover");
+  const over = event("dragover", 100 + dx);
   target.dispatchEvent(over);
-  if (over.defaultPrevented) expect(target.classList.contains(before ? "tm-nav-drop-before" : "tm-nav-drop-after")).toBe(true);
-  target.dispatchEvent(event("drop"));
+  // The line shows on the row it is over, or (over a project's own rows) on the project where it is.
+  const marked = target.closest(".tm-navigation")?.querySelector<HTMLElement>(".tm-nav-drop-before, .tm-nav-drop-after");
+  if (over.defaultPrevented && marked === target) expect(marked.classList.contains(before ? "tm-nav-drop-before" : "tm-nav-drop-after")).toBe(true);
+  const depth = marked?.style.getPropertyValue("--tm-nav-drop-depth") ?? "";
+  target.dispatchEvent(event("drop", 100 + dx));
   source.dispatchEvent(event("dragend"));
-  return over.defaultPrevented;
+  return { taken: over.defaultPrevented, depth };
 }
+const drag = (source: HTMLElement, target: HTMLElement, before: boolean): boolean => dragTo(source, target, before).taken;
 
 it("puts Favorites at the top, filled from any item's right-click menu", async () => {
   const { container, row, favoriteLabels, plugin, settings } = setup();
@@ -167,17 +181,42 @@ it("reorders favourites, smart lists, a parent's subprojects and tags by draggin
   expect(projects()).toEqual(["Home", "Work", "Ads", "Site"]);
   expect(drag(row("project:Site.md")!, row("project:Ads.md")!, true)).toBe(true);
   expect(projects()).toEqual(["Home", "Work", "Site", "Ads"]);
+  // A parent takes its subprojects along.
   expect(drag(row("project:Work.md")!, row("project:Home.md")!, true)).toBe(true);
   expect(projects()).toEqual(["Work", "Site", "Ads", "Home"]);
   expect(settings.navOrder.projects).toEqual(["Work.md", "Site.md", "Ads.md", "Home.md"]);
-  // A subproject stays under its parent: it does not drop among the top projects.
-  expect(drag(row("project:Ads.md")!, row("project:Home.md")!, false)).toBe(false);
+  expect(plugin.updateProject).not.toHaveBeenCalled();
 
   const tags = () => Array.from(sectionLabels(2)).map(label => label.textContent);
   expect(drag(row("tag:errand")!, row("tag:home")!, false)).toBe(true);
   expect(tags()).toEqual(["home", "errand"]);
   expect(settings.navOrder.tags).toEqual(["home", "errand"]);
   expect(container.querySelector(".tm-nav-drop-before, .tm-nav-drop-after, .is-being-dragged")).toBeNull();
+});
+
+it("nests a project under the one above when dragged right, and takes it out when dragged left, as tasks do", async () => {
+  const { row, sectionLabels, settings, plugin } = setup();
+  const tree = () => Array.from(sectionLabels(1)).map(label => `${"-".repeat(Number(label.closest<HTMLElement>(".tm-nav-item")!.style.getPropertyValue("--tm-nav-depth")))}${label.textContent}`);
+  expect(tree()).toEqual(["Home", "Work", "-Ads", "-Site"]);
+  // Right, where it is: under the project above it.
+  expect(dragTo(row("project:Site.md")!, row("project:Site.md")!, true, 30)).toEqual({ taken: true, depth: "2" });
+  await vi.waitFor(() => expect(tree()).toEqual(["Home", "Work", "-Ads", "--Site"]));
+  expect(plugin.updateProject).toHaveBeenLastCalledWith("Site.md", expect.any(Function));
+  // Left, where it is: out from under its parent, a level per step, after the project it was under.
+  expect(dragTo(row("project:Site.md")!, row("project:Site.md")!, true, -20).depth).toBe("1");
+  await vi.waitFor(() => expect(tree()).toEqual(["Home", "Work", "-Ads", "-Site"]));
+  expect(dragTo(row("project:Ads.md")!, row("project:Ads.md")!, true, -40).depth).toBe("0");
+  await vi.waitFor(() => expect(tree()).toEqual(["Home", "Work", "-Site", "Ads"]));
+  // Below a nested project it goes beside it; dragged right, under it; a top project can't nest with nothing above it.
+  expect(dragTo(row("project:Home.md")!, row("project:Site.md")!, false).depth).toBe("1");
+  await vi.waitFor(() => expect(tree()).toEqual(["Work", "-Site", "-Home", "Ads"]));
+  expect(dragTo(row("project:Work.md")!, row("project:Work.md")!, true, 50).depth).toBe("0");
+  expect(tree()).toEqual(["Work", "-Site", "-Home", "Ads"]);
+  // Not into its own subprojects: over them it stays where it is.
+  expect(dragTo(row("project:Work.md")!, row("project:Home.md")!, false, 30)).toEqual({ taken: true, depth: "0" });
+  expect(tree()).toEqual(["Work", "-Site", "-Home", "Ads"]);
+  expect(settings.navOrder.projects).toEqual(["Work.md", "Site.md", "Home.md", "Ads.md"]);
+  expect(plugin.updateProject).toHaveBeenCalledTimes(4);
 });
 
 it("folds the tags from the Tags heading, which no longer opens a list of tags", () => {

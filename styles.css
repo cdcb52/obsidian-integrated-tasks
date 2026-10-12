@@ -83,12 +83,13 @@
 /* Hover and the open item look as the file explorer's do, in the theme's own colours. */
 .tm-navigation .tm-nav-item:hover { background: var(--nav-item-background-hover, var(--background-modifier-hover)); }
 .tm-navigation .tm-nav-item.is-active { background: var(--nav-item-background-active, var(--background-modifier-hover)); color: var(--nav-item-color-active, var(--text-normal)); }
-/* An item dragged to a new place: it fades where it was, and a line in the accent colour shows where it goes. */
+/* An item dragged to a new place: it fades where it was, and a line in the accent colour shows where it goes (for a
+   project, indented as deep as it will be). */
 .tm-navigation .tm-nav-item.is-being-dragged { opacity: 0.5; }
 .tm-navigation .tm-nav-item:is(.tm-nav-drop-before, .tm-nav-drop-after)::after {
   content: "";
   position: absolute;
-  inset-inline: calc(8px + var(--tm-nav-depth, 0) * 16px) 8px;
+  inset-inline: calc(8px + var(--tm-nav-drop-depth, var(--tm-nav-depth, 0)) * 16px) 8px;
   height: 2px;
   border-radius: 1px;
   background: var(--interactive-accent);
