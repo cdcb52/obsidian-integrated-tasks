@@ -59,7 +59,7 @@ function setup() {
   const create = vi.fn(async (path: string) => file(path, root));
   const app = {
     vault: { getRoot: () => root, getAbstractFileByPath: (path: string) => byPath.get(path) ?? null, on: () => ({}), create, createFolder: vi.fn() },
-    workspace: { getActiveFile: () => note, getLeaf, on: () => ({}), trigger: vi.fn(), requestSaveLayout: vi.fn() },
+    workspace: { getActiveFile: () => note, getLeaf, on: () => ({}), trigger: vi.fn(), requestSaveLayout: vi.fn(), getActiveViewOfType: () => null },
     fileManager: { renameFile, promptForDeletion: vi.fn() },
     // Records what the tree hands Obsidian's drag manager: what each row drags, and what each drops.
     dragManager: {
@@ -74,7 +74,7 @@ function setup() {
   const settings = { ...DEFAULT_SETTINGS, showFiles: false };
   const saveSettings = vi.fn(async () => {});
   const plugin = {
-    settings, saveSettings, index: { projects: () => [], tagSummaries: () => [], query: () => [] },
+    settings, saveSettings, index: { projects: () => [], tagSummaries: () => [], query: () => [], subscribe: () => () => {} },
     isFavorite: (key: string) => settings.favorites.includes(key), toggleFavorite: vi.fn(async (key: string) => { settings.favorites = [...settings.favorites, key]; })
   } as unknown as TaskManagerPlugin;
   const view = new TaskNavigationView({ app } as unknown as WorkspaceLeaf, plugin);
@@ -252,6 +252,57 @@ it("puts files dragged beside a file or folder at that place, and keeps that ord
   menus[menus.length - 1].click("Custom order");
   await vi.waitFor(() => expect(labels()).toEqual(["Notes 2", "Work", "Notes 10"]));
 });
+
+it("keeps the file tree as it is through a file drag and the drop's moves, then redraws it once", async () => {
+  const { view, settings, row, labels, app, renameFile, root, work } = setup();
+  settings.showFiles = true;
+  await view.onOpen();
+  const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+  const [notes2, notes10] = [root.children[2], root.children[1]] as TFile[];
+  const dragged = row("file:Notes 2.md");
+  dragged.dispatchEvent(new Event("dragstart", { bubbles: true }));
+  // Redrawn mid-drag, the row dragged would be gone, and the rows under the pointer would jump.
+  view.refresh();
+  await frame();
+  expect(row("file:Notes 2.md")).toBe(dragged);
+  // Dropped into Work, the tree waits for the move (and the links Obsidian updates with it), however long it takes.
+  let moved!: () => void;
+  renameFile.mockImplementationOnce(() => new Promise<void>(resolve => { moved = resolve; }));
+  app.dragManager.drops.get(row("folder:Work"))!({} as DragEvent, { type: "file", file: notes2 }, false);
+  window.dispatchEvent(new Event("dragend"));
+  view.refresh();
+  await frame();
+  expect(row("file:Notes 2.md")).toBe(dragged);
+  root.children.splice(root.children.indexOf(notes2), 1);
+  work.children.push(Object.assign(notes2, { parent: work, path: "Work/Notes 2.md" }));
+  moved();
+  await vi.waitFor(() => expect(labels()).toEqual(["Work", "diagram", "Notes 2", "Plan", "Notes 10"]));
+  // Something dragged in from elsewhere (the file explorer) holds the tree too, until it leaves.
+  const over = row("file:Notes 10.md");
+  over.dispatchEvent(new Event("dragenter", { bubbles: true }));
+  view.refresh();
+  expect(row("file:Notes 10.md")).toBe(over);
+  over.dispatchEvent(new MouseEvent("dragleave", { bubbles: true, relatedTarget: document.body }));
+  await vi.waitFor(() => expect(row("file:Notes 10.md")).not.toBe(over));
+  // Hovering measures a row once, and marks it only where the place changes; a scroll measures again.
+  const target = row("folder:Work");
+  const measure = vi.fn(() => ({ top: 0, height: 20 }) as DOMRect);
+  target.getBoundingClientRect = measure;
+  const hover = (y: number) => app.dragManager.drops.get(target)!({ clientY: y } as DragEvent, { type: "file", file: notes10 }, true);
+  for (const y of [2, 3, 10, 11]) hover(y);
+  expect(measure).toHaveBeenCalledOnce();
+  expect(target.classList.contains("is-drop-target")).toBe(true);
+  expect(target.classList.contains("tm-nav-drop-before")).toBe(false);
+  container(view).dispatchEvent(new Event("scroll"));
+  hover(2);
+  expect(measure).toHaveBeenCalledTimes(2);
+  expect([target.classList.contains("tm-nav-drop-before"), target.classList.contains("is-drop-target")]).toEqual([true, false]);
+  window.dispatchEvent(new Event("dragend"));
+  expect(target.classList.contains("tm-nav-drop-before")).toBe(false);
+  await view.onClose();
+});
+
+const container = (view: TaskNavigationView) => view.containerEl.children[1] as HTMLElement;
 
 it("sorts a folder's files in its custom order, with files not yet placed after them in the chosen order", () => {
   const { root } = setup();

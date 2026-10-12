@@ -59,7 +59,7 @@ it("draws nothing more once closed, even after a press that was waiting to redra
     await view.onOpen();
     handlers.get("pointerdown")!();
     // A redraw that came during the press waits for it to end.
-    Object.assign(view, { renderAfterPress: true });
+    Object.assign(view, { pendingRender: true });
     handlers.get("pointerup")!();
     await view.onClose();
     render.mockRestore();

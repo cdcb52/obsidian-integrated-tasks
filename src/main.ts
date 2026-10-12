@@ -304,8 +304,8 @@ export default class TaskManagerPlugin extends Plugin {
 
   onunload(): void {
     this.unloaded = true;
-    // View options changed in the last moments are still written.
-    if (this.viewOptionsSave !== undefined) void this.saveSettings();
+    // Settings changed in the last moments (view options, the sidebar's paths) are still written.
+    if (this.settingsSave !== undefined) void this.saveSettings();
     this.taskModeController?.dispose();
     // Unset when loading failed early, in loadSettings.
     (this.index as TaskIndex | undefined)?.destroy();
@@ -374,12 +374,12 @@ export default class TaskManagerPlugin extends Plugin {
   }
 
   async saveSettings(): Promise<void> {
-    window.clearTimeout(this.viewOptionsSave);
-    this.viewOptionsSave = undefined;
+    window.clearTimeout(this.settingsSave);
+    this.settingsSave = undefined;
     await this.saveData(this.settings);
   }
 
-  private viewOptionsSave?: number;
+  private settingsSave?: number;
 
   /**
    * Keeps a view's View options (none: its defaults) for its next visit. Filters change as they are typed, so the
@@ -388,26 +388,27 @@ export default class TaskManagerPlugin extends Plugin {
   saveViewOptions(key: string, options: SavedViewOptions | undefined): void {
     if (options) this.settings.viewOptions[key] = options;
     else delete this.settings.viewOptions[key];
-    this.saveViewSoon();
+    this.saveSettingsSoon();
   }
 
   /** Keeps a view's calendar scope and Gantt range (none: the defaults) for its next visit. */
   saveViewPeriod(key: string, period: ViewPeriod | undefined): void {
     if (period && Object.values(period).some(value => value !== undefined)) this.settings.viewPeriods[key] = period;
     else delete this.settings.viewPeriods[key];
-    this.saveViewSoon();
+    this.saveSettingsSoon();
   }
 
   /** Keeps a view's layout (none: a list) for its next visit. */
   saveViewLayout(key: string, layout: ViewLayout | undefined): void {
     if (layout && layout !== "list") this.settings.viewLayouts[key] = layout;
     else delete this.settings.viewLayouts[key];
-    this.saveViewSoon();
+    this.saveSettingsSoon();
   }
 
-  private saveViewSoon(): void {
-    window.clearTimeout(this.viewOptionsSave);
-    this.viewOptionsSave = window.setTimeout(() => { void this.saveSettings().catch(error => new Notice(String(error))); }, 500);
+  /** Writes the settings once changes pause, as one write: a filter being typed, or several notes moved at once. */
+  private saveSettingsSoon(): void {
+    window.clearTimeout(this.settingsSave);
+    this.settingsSave = window.setTimeout(() => { void this.saveSettings().catch(error => new Notice(String(error))); }, 500);
   }
 
   async activateNavigation(reveal = true): Promise<void> {
@@ -536,13 +537,15 @@ export default class TaskManagerPlugin extends Plugin {
     if (!next) return;
     this.settings.favorites = next.favorites;
     this.settings.navOrder = next.navOrder;
-    void this.saveSettings().catch(error => new Notice(String(error)));
-    this.refreshNavigation();
+    // A drop moves notes one after another, each changing the order it leaves; they are written, and drawn, together.
+    this.saveSettingsSoon();
+    this.refreshNavigation(true);
   }
 
-  refreshNavigation(): void {
+  /** Redraws the task sidebar, now or (`soon`) in the next frame. */
+  refreshNavigation(soon = false): void {
     for (const leaf of this.app.workspace.getLeavesOfType(TASK_NAV_VIEW)) {
-      if (leaf.view instanceof TaskNavigationView) leaf.view.refresh();
+      if (leaf.view instanceof TaskNavigationView) leaf.view.refresh(soon);
     }
   }
 

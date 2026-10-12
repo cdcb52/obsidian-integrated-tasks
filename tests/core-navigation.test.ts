@@ -51,12 +51,16 @@ const bubble = (target: FakeElement, event: Event): void => {
 function setup() {
   let listener: () => void = () => {};
   const frames = new Map<number, () => void>();
-  let nextFrame = 1;
+  const timers = new Map<number, () => void>();
+  let next = 1;
   const win = {
-    requestAnimationFrame: vi.fn((callback: () => void) => { frames.set(nextFrame, callback); return nextFrame++; }),
-    cancelAnimationFrame: vi.fn((id: number) => { frames.delete(id); })
+    requestAnimationFrame: vi.fn((callback: () => void) => { frames.set(next, callback); return next++; }),
+    cancelAnimationFrame: vi.fn((id: number) => { frames.delete(id); }),
+    setTimeout: vi.fn((callback: () => void) => { timers.set(next, callback); return next++; }),
+    clearTimeout: vi.fn((id: number) => { timers.delete(id); })
   };
-  const runFrames = () => { const pending = [...frames.values()]; frames.clear(); for (const run of pending) run(); };
+  const run = (queue: Map<number, () => void>) => () => { const pending = [...queue.values()]; queue.clear(); for (const callback of pending) callback(); };
+  const [runFrames, settle] = [run(frames), run(timers)];
   const tagSummaries = vi.fn(() => [{ name: "work", openTasks: 1, completedTasks: 0 }]);
   const plugin = {
     settings: { taskMode: false, smartLists: [] },
@@ -70,33 +74,40 @@ function setup() {
     registerEvent: vi.fn(), registerDomEvent: vi.fn()
   });
   const render = vi.spyOn(view as unknown as { render(): void }, "render");
-  return { view, content, win, runFrames, render, tagSummaries, emit: () => listener() };
+  return { view, content, win, runFrames, settle, render, tagSummaries, emit: () => listener() };
 }
 
-it("coalesces index updates into one render per frame and cancels a pending frame on close", async () => {
-  const { view, win, runFrames, render, emit } = setup();
+it("renders once a burst of index updates pauses, in the next frame, and cancels what is pending on close", async () => {
+  const { view, win, runFrames, settle, render, emit } = setup();
   await view.onOpen();
   render.mockClear();
+  // Each update puts the redraw off again (as a moved note's links are updated, note by note).
   emit(); emit(); emit();
+  expect(win.setTimeout).toHaveBeenCalledTimes(3);
+  expect(win.clearTimeout).toHaveBeenCalledTimes(2);
+  expect(win.requestAnimationFrame).not.toHaveBeenCalled();
+  settle();
   expect(win.requestAnimationFrame).toHaveBeenCalledOnce();
   expect(render).not.toHaveBeenCalled();
   runFrames();
   expect(render).toHaveBeenCalledOnce();
-  emit();
+  emit(); settle();
   // A direct render (for example, a selection change) supersedes the queued frame.
   view.refresh();
   expect(win.cancelAnimationFrame).toHaveBeenCalledOnce();
   runFrames();
   expect(render).toHaveBeenCalledTimes(2);
-  emit();
+  // Closing cancels a queued frame, and a redraw still waiting for updates to pause.
+  emit(); settle(); emit();
   await view.onClose();
   expect(win.cancelAnimationFrame).toHaveBeenCalledTimes(2);
-  runFrames();
+  settle(); runFrames();
+  expect(win.requestAnimationFrame).toHaveBeenCalledTimes(3);
   expect(render).toHaveBeenCalledTimes(2);
 });
 
 it("keeps keyboard focus across re-renders and roves focus within the toolbar", async () => {
-  const { view, content, runFrames, tagSummaries, emit } = setup();
+  const { view, content, runFrames, settle, tagSummaries, emit } = setup();
   await view.onOpen();
   view.setActive("tags", "work");
   expect(tagSummaries).toHaveBeenCalled();
@@ -115,13 +126,13 @@ it("keeps keyboard focus across re-renders and roves focus within the toolbar", 
   expect(doc.activeElement).toBe(toolbar()[2]);
   expect(toolbar().map(button => button.attrs.tabindex)).toEqual(["-1", "-1", "0"]);
   // The toolbar's tab stop and the focused element survive an index-driven re-render.
-  emit(); runFrames();
+  emit(); settle(); runFrames();
   expect(toolbar().map(button => button.attrs.tabindex)).toEqual(["-1", "-1", "0"]);
   expect(doc.activeElement).toBe(toolbar()[2]);
   const tag = content.byKey("tag:work");
   tag.focus();
   content.scrollTop = 120;
-  emit(); runFrames();
+  emit(); settle(); runFrames();
   expect(content.byKey("tag:work")).not.toBe(tag);
   expect(doc.activeElement).toBe(content.byKey("tag:work"));
   expect(content.scrollTop).toBe(120);

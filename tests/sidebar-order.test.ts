@@ -106,16 +106,25 @@ it("adds favourites, takes them out, and keeps them with a deleted smart list's 
   expect(made.settings.customFileOrder).toBe(false);
 });
 
-it("follows renamed and deleted notes and folders in the favourites", async () => {
-  const { plugin: made, refresh } = plugin();
+it("follows renamed and deleted notes and folders in the favourites, writing them once the changes pause", async () => {
+  const { plugin: made, refresh, saved } = plugin();
   await made.loadSettings();
-  made.settings.favorites = ["file:Notes.md", "folder:Work", "project:Work/Site.md"];
-  const internal = made as unknown as { followSidebarPaths(file: unknown, oldPath?: string): void };
-  internal.followSidebarPaths(Object.assign(new TFile(), { path: "Ideas.md" }), "Notes.md");
-  expect(made.settings.favorites).toEqual(["file:Ideas.md", "folder:Work", "project:Work/Site.md"]);
-  internal.followSidebarPaths(Object.assign(new TFolder(), { path: "Work" }));
-  expect(made.settings.favorites).toEqual(["file:Ideas.md"]);
-  expect(refresh).toHaveBeenCalledTimes(2);
-  internal.followSidebarPaths(Object.assign(new TFile(), { path: "Other.md" }));
-  expect(refresh).toHaveBeenCalledTimes(2);
+  vi.useFakeTimers();
+  try {
+    made.settings.favorites = ["file:Notes.md", "folder:Work", "project:Work/Site.md"];
+    vi.mocked(made.saveData).mockClear();
+    const internal = made as unknown as { followSidebarPaths(file: unknown, oldPath?: string): void };
+    internal.followSidebarPaths(Object.assign(new TFile(), { path: "Ideas.md" }), "Notes.md");
+    expect(made.settings.favorites).toEqual(["file:Ideas.md", "folder:Work", "project:Work/Site.md"]);
+    internal.followSidebarPaths(Object.assign(new TFolder(), { path: "Work" }));
+    expect(made.settings.favorites).toEqual(["file:Ideas.md"]);
+    // A drop moving several notes redraws the sidebar in the next frame, and writes the settings once.
+    expect(refresh.mock.calls).toEqual([[true], [true]]);
+    expect(made.saveData).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(made.saveData).toHaveBeenCalledOnce();
+    expect(saved().favorites).toEqual(["file:Ideas.md"]);
+    internal.followSidebarPaths(Object.assign(new TFile(), { path: "Other.md" }));
+    expect(refresh).toHaveBeenCalledTimes(2);
+  } finally { vi.useRealTimers(); }
 });

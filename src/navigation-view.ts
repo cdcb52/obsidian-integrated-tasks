@@ -119,12 +119,14 @@ export class TaskNavigationView extends ItemView {
   private fileEvents = false;
   private unsubscribe?: () => void;
   private frame?: number;
+  private settleTimer?: number;
   /**
    * A press on the list in progress: rebuilding it now would take the pressed row away before its click (on phones,
    * the first tap would only make the sidebar active), so the list waits until the press ends.
    */
   private pressed = false;
-  private renderAfterPress = false;
+  /** A redraw waiting for a press, a drag or a drop's file moves to end. */
+  private pendingRender = false;
   private releaseTimer?: number;
   private closed = false;
   /**
@@ -132,6 +134,16 @@ export class TaskNavigationView extends ItemView {
    * as a favourite, for a drop into Favorites. The list waits for the drop.
    */
   private dragging?: { group: string; key: string; x?: number; favorite?: string };
+  /** Something dragged over the list (a file from the file explorer, say): the rows under it stay until it leaves or drops. */
+  private dragOver = false;
+  /** A drop's file moves under way: the list redraws once they are done (see whileMoving). */
+  private moving = 0;
+  /** Where the drop line (or, for a drop into a row, its highlight) is, so a pointer move touches only what changed. */
+  private dropMark?: { row: HTMLElement; place: DropPlace; depth?: number };
+  /** Rows measured during a drag, each once, until the list scrolls or is redrawn. */
+  private rects = new WeakMap<HTMLElement, DOMRect>();
+  /** The open file's path, looked up once per redraw for the file rows. */
+  private activeFile?: string;
   // The toolbar is one tab stop; arrow keys move between its buttons.
   private toolbarFocus = 0;
   constructor(leaf: WorkspaceLeaf, private readonly plugin: TaskManagerPlugin) { super(leaf); }
@@ -147,7 +159,7 @@ export class TaskNavigationView extends ItemView {
   }
   async onOpen(): Promise<void> {
     this.closed = false;
-    this.unsubscribe = this.plugin.index.subscribe(() => this.scheduleRender());
+    this.unsubscribe = this.plugin.index.subscribe(() => this.scheduleSettledRender());
     const syncActive = (): void => {
       if (this.plugin.settings.showFiles) this.scheduleRender();
       const view = this.app.workspace.getActiveViewOfType(ItemView);
@@ -170,17 +182,36 @@ export class TaskNavigationView extends ItemView {
       if (this.releaseTimer !== undefined) this.containerEl.win.clearTimeout(this.releaseTimer);
       this.releaseTimer = this.containerEl.win.setTimeout(() => {
         this.releaseTimer = undefined;
-        if (!this.renderAfterPress) return;
-        this.renderAfterPress = false;
+        if (!this.pendingRender) return;
+        this.pendingRender = false;
         this.scheduleRender();
       }, 400);
     };
-    this.registerDomEvent(this.containerEl, "pointerdown", () => { this.pressed = true; });
+    this.registerDomEvent(this.containerEl, "pointerdown", () => {
+      this.pressed = true;
+      // No drag goes on during a press: one whose end never came here is over.
+      this.dragging = undefined;
+      this.dragOver = false;
+    });
     this.registerDomEvent(this.containerEl.win, "pointerup", release, true);
     this.registerDomEvent(this.containerEl.win, "pointercancel", release, true);
+    // While something is dragged over the list, it stays as it is (see render).
+    const over = (): void => { this.dragOver = true; };
+    this.registerDomEvent(this.containerEl, "dragenter", over, true);
+    this.registerDomEvent(this.containerEl, "dragover", over, true);
+    this.registerDomEvent(this.containerEl, "dragleave", event => {
+      if (this.containerEl.contains(event.relatedTarget as Node | null)) return;
+      this.dragOver = false;
+      this.resumeRender();
+    }, true);
+    this.registerDomEvent(this.containerEl, "scroll", () => { this.rects = new WeakMap(); }, true);
     // A drag that ends anywhere (dropped elsewhere, or let go) takes its drop line with it.
     this.registerDomEvent(this.containerEl.win, "dragend", () => this.endDrag(), true);
-    this.registerDomEvent(this.containerEl.win, "drop", () => this.showDropLine(), true);
+    this.registerDomEvent(this.containerEl.win, "drop", () => {
+      this.showDropLine();
+      this.dragOver = false;
+      this.resumeRender();
+    }, true);
     syncActive();
     this.render();
   }
@@ -188,6 +219,8 @@ export class TaskNavigationView extends ItemView {
     this.closed = true;
     this.unsubscribe?.();
     this.cancelRender();
+    if (this.settleTimer !== undefined) this.containerEl.win.clearTimeout(this.settleTimer);
+    this.settleTimer = undefined;
     if (this.releaseTimer !== undefined) this.containerEl.win.clearTimeout(this.releaseTimer);
     this.releaseTimer = undefined;
   }
@@ -200,9 +233,12 @@ export class TaskNavigationView extends ItemView {
     else if (project) this.expanded.add("projects");
     this.render();
   }
-  refresh(): void { this.render(); }
+  /** Redraws the list now, or (`soon`) in the next frame, along with anything else that changed by then. */
+  refresh(soon = false): void {
+    if (soon) this.scheduleRender(); else this.render();
+  }
 
-  /** Index events arrive in bursts, so render at most once per frame. */
+  /** Changes arrive in bursts, so render at most once per frame. */
   private scheduleRender(): void {
     if (this.closed || this.frame !== undefined) return;
     this.frame = this.containerEl.win.requestAnimationFrame(() => {
@@ -210,6 +246,25 @@ export class TaskNavigationView extends ItemView {
       // A name being typed keeps its field; the list catches up when the rename ends.
       if (!this.renaming) this.render();
     });
+  }
+
+  /**
+   * Index and vault events come in bursts (a moved note changes every note that links to it, each one indexed again),
+   * so the list redraws once they pause.
+   */
+  private scheduleSettledRender(): void {
+    if (this.closed) return;
+    const win = this.containerEl.win;
+    if (this.settleTimer !== undefined) win.clearTimeout(this.settleTimer);
+    this.settleTimer = win.setTimeout(() => {
+      this.settleTimer = undefined;
+      this.scheduleRender();
+    }, 100);
+  }
+
+  /** A redraw that waited (for a press, a drag or a drop's moves) happens, once nothing holds it any more. */
+  private resumeRender(): void {
+    if (this.pendingRender) this.scheduleRender();
   }
 
   private cancelRender(): void {
@@ -223,9 +278,13 @@ export class TaskNavigationView extends ItemView {
   private render(): void {
     this.cancelRender();
     if (this.closed) return;
-    // Rebuilding the list mid-press, or mid-drag, would take away the row being pressed or dragged.
-    if (this.pressed || this.dragging) { this.renderAfterPress = true; return; }
-    this.renderAfterPress = false;
+    // Rebuilding the list mid-press, or mid-drag, would take away the row being pressed or dragged (or the rows under it);
+    // mid-drop, the files being moved would redraw it again and again.
+    if (this.pressed || this.dragging || this.dragOver || this.moving) { this.pendingRender = true; return; }
+    this.pendingRender = false;
+    // The rows are drawn anew.
+    this.dropMark = undefined;
+    this.rects = new WeakMap();
     const container = this.containerEl.children[1] as HTMLElement;
     // Rebuilding the list would drop keyboard focus and scroll position; restore both afterwards.
     const focused = container.ownerDocument.activeElement as HTMLElement | null;
@@ -280,7 +339,10 @@ export class TaskNavigationView extends ItemView {
     rove(Math.min(this.toolbarFocus, buttons.length - 1));
 
     const nav = container.createDiv({ cls: "nav-files-container tm-nav-list", attr: { "aria-label": "Task navigation" } });
-    if (this.settings.showFiles || this.settings.favorites?.some(key => /^(file|folder):/.test(key))) this.watchFiles();
+    if (this.settings.showFiles || this.settings.favorites?.some(key => /^(file|folder):/.test(key))) {
+      this.watchFiles();
+      this.activeFile = this.app.workspace.getActiveFile()?.path;
+    }
     this.renderFavorites(nav);
     for (const group of NAV_GROUPS) {
       const lists = nav.createDiv({ cls: "tm-nav-group" });
@@ -503,10 +565,7 @@ export class TaskNavigationView extends ItemView {
    */
   private favoriteDrop(element: HTMLElement, target?: string): void {
     const beside = target !== undefined;
-    const mark = (place?: DropPlace): void => {
-      if (beside) this.showDropLine(place && element, place);
-      else element.classList.toggle("is-drop-target", Boolean(place));
-    };
+    const mark = (place?: DropPlace): void => this.showDropLine(place && element, place);
     const dragged = (): string | undefined => this.dragging?.group === "favorites" && beside ? undefined : this.dragging?.favorite;
     element.addEventListener("dragover", event => {
       if (!dragged()) return;
@@ -635,26 +694,42 @@ export class TaskNavigationView extends ItemView {
    * or after it; for a folder (`into`), the middle half is into it, and its bottom only after it while it is closed.
    */
   private dropPlace(row: HTMLElement, event: DragEvent, into: boolean, open = false): DropPlace {
-    const rect = row.getBoundingClientRect();
+    const rect = this.rectOf(row);
     const y = event.clientY - rect.top;
     if (!(rect.height > 0) || !Number.isFinite(y)) return into ? "into" : "after";
     if (!into) return y < rect.height / 2 ? "before" : "after";
     return y < rect.height / 4 ? "before" : y > rect.height * 3 / 4 && !open ? "after" : "into";
   }
 
-  /** The line where a dragged item goes, on `row` (none: taken away), indented to `depth` when it says how deep it goes. */
-  private showDropLine(row?: HTMLElement, place?: DropPlace, depth?: number): void {
-    const container = this.containerEl.children[1] as HTMLElement | undefined;
-    for (const marked of Array.from(container?.querySelectorAll?.<HTMLElement>(".tm-nav-drop-before, .tm-nav-drop-after") ?? [])) {
-      if (marked === row && place !== "into") continue;
-      marked.classList.remove("tm-nav-drop-before", "tm-nav-drop-after");
-      marked.style.removeProperty("--tm-nav-drop-depth");
+  /**
+   * `row`'s place on screen, measured once while the pointer moves over it: measuring on every move would lay out the
+   * whole list again each time, after the drop line changed.
+   */
+  private rectOf(row: HTMLElement): DOMRect {
+    let rect = this.rects.get(row);
+    if (!rect) {
+      rect = row.getBoundingClientRect();
+      this.rects.set(row, rect);
     }
-    if (!row || !place || place === "into") return;
-    row.classList.toggle("tm-nav-drop-before", place === "before");
-    row.classList.toggle("tm-nav-drop-after", place === "after");
-    if (depth === undefined) row.style.removeProperty("--tm-nav-drop-depth");
-    else row.style.setProperty("--tm-nav-drop-depth", String(depth));
+    return rect;
+  }
+
+  /**
+   * Shows where a dragged item goes: a line before or after `row`, indented to `depth` when it says how deep it goes,
+   * or (`into`) `row` lit up. None takes it away. Called on every move of the pointer, it touches the rows only when
+   * the place changes.
+   */
+  private showDropLine(row?: HTMLElement, place?: DropPlace, depth?: number): void {
+    const mark = this.dropMark;
+    if (mark?.row === row && mark?.place === place && mark?.depth === depth) return;
+    if (mark) {
+      mark.row.classList.remove("tm-nav-drop-before", "tm-nav-drop-after", "is-drop-target");
+      mark.row.style.removeProperty("--tm-nav-drop-depth");
+    }
+    this.dropMark = row && place ? { row, place, depth } : undefined;
+    if (!row || !place) return;
+    row.addClass(place === "into" ? "is-drop-target" : `tm-nav-drop-${place}`);
+    if (depth !== undefined) row.style.setProperty("--tm-nav-drop-depth", String(depth));
   }
 
   /**
@@ -722,7 +797,7 @@ export class TaskNavigationView extends ItemView {
       line = { row: dragged.row, place: "before" };
       natural = dragged.depth;
     } else {
-      const rect = target.row.getBoundingClientRect();
+      const rect = this.rectOf(target.row);
       const before = rect.height > 0 && event.clientY - rect.top < rect.height / 2;
       const index = others.indexOf(target);
       above = before ? others[index - 1] : target;
@@ -773,11 +848,17 @@ export class TaskNavigationView extends ItemView {
   /** A drag is over (a drag is no press either): its line goes, and a redraw that waited for it happens. */
   private endDrag(): void {
     this.dragging = undefined;
+    this.dragOver = false;
     this.pressed = false;
     this.showDropLine();
+    this.rects = new WeakMap();
+    // What else is still marked (Obsidian's drag manager marks the rows a file is dragged over too), once, at the end.
     const container = this.containerEl.children[1] as HTMLElement | undefined;
-    for (const row of Array.from(container?.querySelectorAll?.(".is-being-dragged, .is-drop-target") ?? [])) row.classList.remove("is-being-dragged", "is-drop-target");
-    if (this.renderAfterPress) this.scheduleRender();
+    for (const row of Array.from(container?.querySelectorAll?.<HTMLElement>(".is-being-dragged, .is-drop-target, .tm-nav-drop-before, .tm-nav-drop-after") ?? [])) {
+      row.classList.remove("is-being-dragged", "is-drop-target", "tm-nav-drop-before", "tm-nav-drop-after");
+      row.style.removeProperty("--tm-nav-drop-depth");
+    }
+    this.resumeRender();
   }
 
   /**
@@ -816,7 +897,7 @@ export class TaskNavigationView extends ItemView {
   private watchFiles(): void {
     if (this.fileEvents) return;
     this.fileEvents = true;
-    const changed = (): void => this.scheduleRender();
+    const changed = (): void => this.scheduleSettledRender();
     this.registerEvent(this.app.vault.on("create", changed));
     this.registerEvent(this.app.vault.on("delete", changed));
     this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
@@ -831,7 +912,7 @@ export class TaskNavigationView extends ItemView {
       }
       changed();
     }));
-    this.registerEvent(this.app.workspace.on("file-open", changed));
+    this.registerEvent(this.app.workspace.on("file-open", () => this.scheduleRender()));
   }
 
   /** `folder`'s children in the file tree's order: dragged into place, when they were, else by the chosen order. */
@@ -863,7 +944,7 @@ export class TaskNavigationView extends ItemView {
     };
     const row = file instanceof TFolder
       ? this.item(parent, key, file.name, false, () => { toggle(); this.render(); }, { icon: open ? "folder-open" : "folder", color: "muted", expanded: open })
-      : this.item(parent, key, file.basename, file.path === this.app.workspace.getActiveFile()?.path,
+      : this.item(parent, key, file.basename, file.path === this.activeFile,
         event => this.app.workspace.getLeaf(Keymap.isModEvent(event)).openFile(file), { icon: FILE_ICONS[file.extension.toLowerCase()] ?? "file", color: "muted" });
     row.addClass(isFolder ? "tm-nav-folder" : "tm-nav-file");
     row.style.setProperty("--tm-nav-depth", String(depth));
@@ -953,6 +1034,11 @@ export class TaskNavigationView extends ItemView {
     if (!manager || this.renaming?.path === file.path) return;
     manager.handleDrag(row, event => file instanceof TFile ? manager.dragFile(event, file, "tm-files")
       : file instanceof TFolder ? manager.dragFolder(event, file, "tm-files") : null);
+    // The list stays as it is until the drag ends, wherever it goes: redrawn, the row dragged would be gone.
+    row.addEventListener("dragstart", () => {
+      this.pressed = false;
+      this.dragging = { group: "files", key: file.path };
+    });
   }
 
   /**
@@ -971,25 +1057,34 @@ export class TaskNavigationView extends ItemView {
       const destination = place === "into" ? folder : target.parent;
       const moving = !destination ? [] : place === "into" ? files.filter(file => canMoveInto(file, destination))
         : files.filter(file => file !== target && (file.parent === destination || canMoveInto(file, destination)));
-      const shown = hovering && moving.length ? place : undefined;
-      this.showDropLine(row, shown);
-      // Obsidian lights the row up too; kept here as well, as the place changes while over the same row.
-      row.classList.toggle("is-drop-target", shown === "into");
+      // Obsidian marks the row too; kept here as well, as the place changes while over the same row.
+      this.showDropLine(row, hovering && moving.length ? place : undefined);
       if (!destination || !moving.length) return { action: "", dropEffect: "none" };
-      if (!hovering) void (place === "into" ? this.moveInto(moving, destination) : this.placeFiles(moving, target, place === "after"));
+      if (!hovering) void this.whileMoving(() => place === "into" ? this.moveInto(moving, destination) : this.placeFiles(moving, target, place === "after"));
       const into = `Move into ${destination.isRoot() ? "the vault" : destination.name}`;
       return place === "into" ? { action: into, dropEffect: "move", hoverEl: row, hoverClass: "is-drop-target" }
         : { action: moving.every(file => file.parent === destination) ? "Move here" : into, dropEffect: "move", hoverEl: row, hoverClass: `tm-nav-drop-${place}` };
     });
-    row.addEventListener("dragleave", event => {
-      if (row.contains(event.relatedTarget as Node | null)) return;
-      this.showDropLine();
-      row.classList.remove("is-drop-target");
-    });
+    row.addEventListener("dragleave", event => { if (!row.contains(event.relatedTarget as Node | null)) this.showDropLine(); });
+  }
+
+  /**
+   * Runs a drop's file moves with the list held as it is, then redraws it once. Each move, the orders and favourites
+   * that follow it, and each note whose links Obsidian then updates would otherwise redraw it, over and over.
+   */
+  private async whileMoving(moves: () => Promise<unknown>): Promise<void> {
+    this.moving++;
+    try { await moves(); }
+    catch (error) { new Notice(String(error)); }
+    finally {
+      this.moving--;
+      this.pendingRender = true;
+      if (!this.moving) this.resumeRender();
+    }
   }
 
   /** Moves files and folders into `folder`, keeping their names; a name already taken there stays put. Returns those moved. */
-  private async moveInto(files: TAbstractFile[], folder: TFolder, render = true): Promise<TAbstractFile[]> {
+  private async moveInto(files: TAbstractFile[], folder: TFolder): Promise<TAbstractFile[]> {
     const moved: TAbstractFile[] = [];
     for (const file of files) {
       const path = `${folder.isRoot() ? "" : `${folder.path}/`}${file.name}`;
@@ -998,7 +1093,6 @@ export class TaskNavigationView extends ItemView {
       catch (error) { new Notice(String(error)); }
     }
     this.showFolder(folder);
-    if (render) this.render();
     return moved;
   }
 
@@ -1010,9 +1104,9 @@ export class TaskNavigationView extends ItemView {
     const folder = target.parent;
     if (!folder) return;
     const here = files.filter(file => file.parent === folder);
-    const moved = await this.moveInto(files.filter(file => file.parent !== folder), folder, false);
+    const moved = await this.moveInto(files.filter(file => file.parent !== folder), folder);
     const placed = [...here, ...moved].map(file => file.name);
-    if (!placed.length) { this.render(); return; }
+    if (!placed.length) return;
     const names = this.folderChildren(folder).map(file => file.name).filter(name => !placed.includes(name));
     const at = names.indexOf(target.name);
     names.splice(at < 0 ? names.length : at + (after ? 1 : 0), 0, ...placed);
