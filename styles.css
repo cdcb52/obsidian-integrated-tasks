@@ -1136,11 +1136,19 @@ button.tm-gantt-handle.is-finish:focus-visible,
   color: var(--text-accent);
 }
 .tm-main-view.tm-style-griply .tm-section.is-alert h2 { color: var(--text-error); }
-/* A board's columns head their cards as a list's groups do, and its cards are shaded as the layout switcher is. */
+/* A board's columns head their cards as a list's groups do, and its cards stand raised off the board, as Griply's do. */
 .tm-main-view.tm-style-griply .tm-kanban-column-header { padding-bottom: var(--size-4-2); border-bottom: 1px solid var(--background-modifier-border); }
 .tm-main-view.tm-style-griply .tm-kanban-column-header h2 { color: var(--text-accent); }
 .tm-main-view.tm-style-griply .tm-kanban-column.is-alert .tm-kanban-column-header h2 { color: var(--text-error); }
-.tm-main-view.tm-style-griply .tm-kanban .tm-task-row:not(.is-selected) { background: var(--background-modifier-hover); }
+.tm-main-view.tm-style-griply .tm-kanban .tm-task-row {
+  border: 0;
+  border-radius: 10px;
+  background: var(--background-primary);
+  box-shadow: var(--shadow-s), inset 0 0 0 1px color-mix(in srgb, var(--text-normal) 6%, transparent);
+}
+.tm-main-view.tm-style-griply .tm-kanban .tm-task-row.has-project-color { box-shadow: inset 3px 0 0 var(--tm-project-color), var(--shadow-s), inset 0 0 0 1px color-mix(in srgb, var(--text-normal) 6%, transparent); }
+/* The selection colour is laid over the card, which keeps its own background (and its lift) beneath. */
+.tm-main-view.tm-style-griply .tm-kanban .tm-task-row.is-selected { background: linear-gradient(var(--text-selection), var(--text-selection)), var(--background-primary); }
 .tm-main-view.tm-style-griply button.tm-group-fold {
   position: static;
   order: 99;
