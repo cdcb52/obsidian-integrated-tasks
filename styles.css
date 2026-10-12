@@ -115,6 +115,8 @@
 .tm-nav-progress .tm-project-progress { min-height: 0; font-size: 14px; }
 @media (hover: none) { .tm-navigation .tm-nav-collapse { opacity: 1; } }
 .tm-nav-empty { padding: 4px 8px 4px 36px; font-size: var(--font-ui-small); color: var(--text-faint); }
+/* The empty Favorites list, lit up while something dragged over it would join it. */
+.tm-navigation .tm-nav-empty.is-drop-target { border-radius: 8px; background: var(--interactive-accent); color: var(--text-on-accent); }
 /* The file tree reads like the file explorer: names in the normal weight with folders in bold, a file's kind after its name, and renaming in place. */
 .tm-navigation .tm-nav-files .tm-nav-children button.tm-nav-label { font-weight: var(--font-normal); }
 .tm-navigation .tm-nav-files .tm-nav-folder button.tm-nav-label { font-weight: var(--font-bold); }

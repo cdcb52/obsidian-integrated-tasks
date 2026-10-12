@@ -54,7 +54,14 @@ function setup(favorites: string[] = []) {
   const app = {
     vault: { getRoot: () => root, getAbstractFileByPath: (path: string) => byPath.get(path) ?? null, on: () => ({}) },
     workspace: { getActiveFile: () => null, getLeaf: vi.fn(() => ({ openFile })), on: () => ({}), trigger: vi.fn(), requestSaveLayout: vi.fn() },
-    fileManager: { renameFile: vi.fn(), promptForDeletion: vi.fn() }
+    fileManager: { renameFile: vi.fn(), promptForDeletion: vi.fn() },
+    // Records what each row hands Obsidian's drag manager to drop.
+    dragManager: {
+      drops: new Map<HTMLElement, (event: DragEvent, draggable: unknown, hovering: boolean) => unknown>(),
+      handleDrag: () => {},
+      handleDrop(element: HTMLElement, drop: (event: DragEvent, draggable: unknown, hovering: boolean) => unknown) { this.drops.set(element, drop); },
+      dragFile: () => ({}), dragFolder: () => ({})
+    }
   };
   const settings = {
     ...DEFAULT_SETTINGS, showFiles: true, favorites, navOrder: { projects: [], tags: [], files: {} },
@@ -89,7 +96,7 @@ function setup(favorites: string[] = []) {
   const favoriteLabels = () => Array.from(container.querySelectorAll(".tm-nav-favorites .tm-nav-children .tm-nav-label")).map(label => label.textContent);
   const sectionLabels = (index: number) => Array.from(container.querySelectorAll(".tm-nav-list > .tm-nav-section"))[index]
     .querySelectorAll(".tm-nav-children .tm-nav-label");
-  return { view, settings, plugin, container, row, favoriteLabels, sectionLabels, openFile };
+  return { view, settings, plugin, container, row, favoriteLabels, sectionLabels, openFile, app, byPath };
 }
 
 const rightClick = (row: HTMLElement) => {
@@ -128,7 +135,7 @@ it("puts Favorites at the top, filled from any item's right-click menu", async (
   const first = container.querySelector(".tm-nav-list > .tm-nav-group")!;
   expect(first.classList.contains("tm-nav-favorites")).toBe(true);
   expect(first.querySelector(".tm-nav-label")!.textContent).toBe("Favorites");
-  expect(first.querySelector(".tm-nav-empty")!.textContent).toBe("Right-click an item to add it here");
+  expect(first.querySelector(".tm-nav-empty")!.textContent).toBe("Drag an item here, or right-click it");
   // A list, the Projects view, a smart list, a tag, a folder and a file.
   for (const key of ["mode:today", "mode:projects", "list:calls", "tag:home", "folder:Work", "file:Notes.md"]) {
     const menu = rightClick(row(key)!);
@@ -217,6 +224,37 @@ it("nests a project under the one above when dragged right, and takes it out whe
   expect(tree()).toEqual(["Work", "-Site", "-Home", "Ads"]);
   expect(settings.navOrder.projects).toEqual(["Work.md", "Site.md", "Home.md", "Ads.md"]);
   expect(plugin.updateProject).toHaveBeenCalledTimes(4);
+});
+
+it("adds what is dropped into Favorites: on its heading at the end, beside a favourite, or on the empty list", async () => {
+  const { row, container, favoriteLabels, settings, app, byPath } = setup();
+  const hint = container.querySelector<HTMLElement>(".tm-nav-favorites .tm-nav-empty")!;
+  // A list keeps its place in the lists, but drops into Favorites.
+  expect(dragTo(row("mode:today")!, hint, false).taken).toBe(true);
+  expect(settings.favorites).toEqual(["mode:today"]);
+  expect(favoriteLabels()).toEqual(["Today"]);
+  expect(drag(row("tag:home")!, row("favorites")!, false)).toBe(true);
+  expect(settings.favorites).toEqual(["mode:today", "tag:home"]);
+  // Beside a favourite, before or after it.
+  expect(drag(row("project:Site.md")!, row("favorite:tag:home")!, true)).toBe(true);
+  expect(drag(row("list:errands")!, row("favorite:mode:today")!, false)).toBe(true);
+  expect(favoriteLabels()).toEqual(["Today", "Errands", "Site", "home"]);
+  // A favourite dropped on the heading moves to the end.
+  expect(drag(row("favorite:mode:today")!, row("favorites")!, false)).toBe(true);
+  expect(settings.favorites).toEqual(["list:errands", "project:Site.md", "tag:home", "mode:today"]);
+  expect(container.querySelector(".is-drop-target, .tm-nav-drop-before, .tm-nav-drop-after")).toBeNull();
+  // Files and folders, from the file tree or the file explorer, drop in through Obsidian's drag manager.
+  const drops = app.dragManager.drops;
+  const heading = row("favorites")!;
+  expect(drops.get(heading)!({} as DragEvent, { type: "folder", file: byPath.get("Work") }, true)).toMatchObject({ action: "Add to favorites", hoverClass: "is-drop-target" });
+  expect(heading.classList.contains("is-drop-target")).toBe(true);
+  drops.get(heading)!({} as DragEvent, { type: "folder", file: byPath.get("Work") }, false);
+  const beside = row("favorite:list:errands")!;
+  beside.getBoundingClientRect = () => ({ top: 0, height: 20 }) as DOMRect;
+  drops.get(beside)!({ clientY: 2 } as DragEvent, { type: "file", file: byPath.get("Notes.md") }, false);
+  await vi.waitFor(() => expect(settings.favorites).toEqual(["file:Notes.md", "list:errands", "project:Site.md", "tag:home", "mode:today", "folder:Work"]));
+  // What is not a file (a task, say) is left to other targets.
+  expect(drops.get(row("favorites")!)!({} as DragEvent, null, true)).toBeUndefined();
 });
 
 it("folds the tags from the Tags heading, which no longer opens a list of tags", () => {

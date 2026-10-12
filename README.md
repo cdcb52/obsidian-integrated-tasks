@@ -85,7 +85,7 @@ Today and Upcoming use a task's scheduled date or its deadline, whichever comes 
 
 Press **Cmd/Ctrl+K** in a task view (or run **Quick switch to view, project, tag, or task**) to jump to any view, project, tag, smart list or open task by typing its name.
 
-The task sidebar lists these views with your smart lists, projects, tags and, with **Show files in sidebar**, your vault's files. Right-click anything in it and choose **Add to favorites** to keep it under **Favorites** at the top. Drag items to put them in your own order under their heading, files and folders too; the file tree then follows **Custom order** under **Change sort order**. Click the **Tags** heading to fold your tags away.
+The task sidebar lists these views with your smart lists, projects, tags and, with **Show files in sidebar**, your vault's files. Drag anything in it onto **Favorites** at the top, or right-click it and choose **Add to favorites**, to keep it there. Drag items to put them in your own order under their heading, files and folders too; the file tree then follows **Custom order** under **Change sort order**. Drag a project right to put it under the project above, or left to take it out, as you would a task. Click the **Tags** heading to fold your tags away.
 
 ### Filter, sort and group
 

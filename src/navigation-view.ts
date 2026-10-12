@@ -127,8 +127,11 @@ export class TaskNavigationView extends ItemView {
   private renderAfterPress = false;
   private releaseTimer?: number;
   private closed = false;
-  /** The item being dragged to a new place, and the rows it can go among (see sortable); the list waits for the drop. */
-  private dragging?: { group: string; key: string; x?: number };
+  /**
+   * The item being dragged to a new place: the rows it can go among (see sortable), where the drag began, and what it is
+   * as a favourite, for a drop into Favorites. The list waits for the drop.
+   */
+  private dragging?: { group: string; key: string; x?: number; favorite?: string };
   // The toolbar is one tab stop; arrow keys move between its buttons.
   private toolbarFocus = 0;
   constructor(leaf: WorkspaceLeaf, private readonly plugin: TaskManagerPlugin) { super(leaf); }
@@ -283,6 +286,8 @@ export class TaskNavigationView extends ItemView {
       const lists = nav.createDiv({ cls: "tm-nav-group" });
       for (const entry of group) {
         const row = this.listRow(lists, entry.mode, `mode:${entry.mode}`);
+        // The lists keep their places; they drag only into Favorites.
+        this.sortable(row, "lists", entry.mode, undefined, `mode:${entry.mode}`);
         // Smart lists, being saved views of all tasks, sit under All Tasks.
         if (entry.mode !== "all" || !this.folder(row, "smartLists", "smart lists")) continue;
         const children = lists.createDiv({ cls: "tree-item-children nav-folder-children tm-nav-children" });
@@ -294,7 +299,7 @@ export class TaskNavigationView extends ItemView {
           if (item) this.sortable(item, "smartLists", list.id, (id, target, after) => this.saveOrder(() => {
             const ids = moveKey(this.settings.smartLists.map(list => list.id), id, target, after);
             this.settings.smartLists = inOrder(this.settings.smartLists, ids, list => list.id);
-          }));
+          }), `list:${list.id}`);
         }
         if (!smartLists.length) children.createDiv({ cls: "tm-nav-empty", text: "No smart lists yet" });
       }
@@ -342,7 +347,7 @@ export class TaskNavigationView extends ItemView {
           const row = this.tagRow(children, tag, `tag:${tag.name}`);
           this.sortable(row, "tags", tag.name, (name, target, after) => this.saveOrder(() => {
             this.settings.navOrder = { ...this.settings.navOrder, tags: moveKey(tags.map(item => item.name), name, target, after) };
-          }));
+          }), `tag:${tag.name}`);
         }
         if (!tags.length) children.createDiv({ cls: "tm-nav-empty", text: "No tags yet" });
       }
@@ -464,6 +469,8 @@ export class TaskNavigationView extends ItemView {
   private renderFavorites(nav: HTMLElement): void {
     const group = nav.createDiv({ cls: "tree-item nav-folder tm-nav-group tm-nav-section tm-nav-favorites" });
     const heading = this.item(group, "favorites", "Favorites", false, () => this.toggleSection("favorites"), { icon: "star", color: "section", expanded: this.expanded.has("favorites") });
+    // Anything dropped on the heading joins the end of Favorites.
+    this.favoriteDrop(heading);
     if (!this.folder(heading, "favorites", "favorites")) { group.addClass("is-folded"); return; }
     const children = group.createDiv({ cls: "tree-item-children nav-folder-children tm-nav-children" });
     let shown = 0;
@@ -480,12 +487,63 @@ export class TaskNavigationView extends ItemView {
       shown++;
       this.sortable(row, "favorites", key, (favorite, target, after) => this.saveOrder(() => {
         this.settings.favorites = moveKey(this.settings.favorites, favorite, target, after);
-      }));
+      }), key);
+      this.favoriteDrop(row, key);
       // A favourite folder lists what is in it, as in the file tree.
       const folder = this.favoriteFolder(key);
       if (folder && this.openFolders.has(folder.path)) this.renderFolder(children, folder, 1, "favorites");
     }
-    if (!shown) children.createDiv({ cls: "tm-nav-empty", text: "Right-click an item to add it here" });
+    if (!shown) this.favoriteDrop(children.createDiv({ cls: "tm-nav-empty", text: "Drag an item here, or right-click it" }));
+  }
+
+  /**
+   * Lets items from the rest of the sidebar (and files from the file explorer) drop into Favorites to join them: beside
+   * the favourite `target` is, before or after it, or (no `target`: the heading, or the empty list) at the end. A
+   * favourite dropped there moves; the favourites' own reordering is sortable's.
+   */
+  private favoriteDrop(element: HTMLElement, target?: string): void {
+    const beside = target !== undefined;
+    const mark = (place?: DropPlace): void => {
+      if (beside) this.showDropLine(place && element, place);
+      else element.classList.toggle("is-drop-target", Boolean(place));
+    };
+    const dragged = (): string | undefined => this.dragging?.group === "favorites" && beside ? undefined : this.dragging?.favorite;
+    element.addEventListener("dragover", event => {
+      if (!dragged()) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+      mark(beside ? this.dropPlace(element, event, false) : "into");
+    });
+    element.addEventListener("dragleave", event => { if (!element.contains(event.relatedTarget as Node | null)) mark(); });
+    element.addEventListener("drop", event => {
+      const key = dragged();
+      if (!key) return;
+      event.preventDefault();
+      const after = !beside || this.dropPlace(element, event, false) === "after";
+      mark();
+      this.endDrag();
+      void this.addFavorites([key], target, after).catch(error => new Notice(String(error)));
+    });
+    // Files and folders drag with Obsidian's drag manager, from here or the file explorer.
+    this.dragManager?.handleDrop(element, (event, draggable, hovering) => {
+      const files = (draggable?.type === "files" ? draggable.files ?? [] : draggable?.type === "file" || draggable?.type === "folder" ? [draggable.file] : [])
+        .filter((file): file is TFile | TFolder => file instanceof TFile || (file instanceof TFolder && !file.isRoot()));
+      if (!files.length) return undefined;
+      const place = beside ? this.dropPlace(element, event, false) : "into";
+      mark(hovering ? place : undefined);
+      if (!hovering) void this.addFavorites(files.map(file => `${file instanceof TFolder ? "folder" : "file"}:${file.path}`), target, place === "after");
+      return { action: "Add to favorites", dropEffect: "move", hoverEl: element, hoverClass: beside ? `tm-nav-drop-${place}` : "is-drop-target" };
+    });
+  }
+
+  /** Puts `keys` in Favorites, beside `target` (else at the end), taking them from where they were if already there. */
+  private async addFavorites(keys: string[], target: string | undefined, after: boolean): Promise<void> {
+    const favorites = this.settings.favorites.filter(key => !keys.includes(key));
+    const at = target === undefined ? -1 : favorites.indexOf(target);
+    favorites.splice(at < 0 ? favorites.length : at + (after ? 1 : 0), 0, ...keys);
+    // So what was added shows.
+    this.expanded.add("favorites");
+    await this.saveOrder(() => { this.settings.favorites = favorites; });
   }
 
   private favoriteFolder(key: string): TFolder | undefined {
@@ -537,21 +595,23 @@ export class TaskNavigationView extends ItemView {
   }
 
   /**
-   * Lets `row` be dragged to a new place among the other rows of its `group` (Favorites, the smart lists, a parent's
-   * projects, the tags): a line shows where it goes, before or after the row it is over, and `place` moves it there.
+   * Lets `row` be dragged to a new place among the other rows of its `group` (Favorites, the smart lists, the tags): a
+   * line shows where it goes, before or after the row it is over, and `place` moves it there. Without `place` (the
+   * lists) it keeps its place. As `favorite` it drops into Favorites too (see favoriteDrop).
    */
-  private sortable(row: HTMLElement, group: string, key: string, place: (key: string, target: string, after: boolean) => Promise<void>): void {
+  private sortable(row: HTMLElement, group: string, key: string, place?: (key: string, target: string, after: boolean) => Promise<void>, favorite?: string): void {
     row.setAttribute("draggable", "true");
     row.addEventListener("dragstart", event => {
       if (!event.dataTransfer) return;
       // A drag is no press: the list redraws once it is dropped.
       this.pressed = false;
-      this.dragging = { group, key };
+      this.dragging = { group, key, favorite };
       // Its own type, so it does not drop into a note as text.
       event.dataTransfer.setData(NAV_DRAG_TYPE, key);
       event.dataTransfer.effectAllowed = "move";
       row.addClass("is-being-dragged");
     });
+    if (!place) return;
     const accepts = (): boolean => this.dragging?.group === group && this.dragging.key !== key;
     row.addEventListener("dragover", event => {
       if (!accepts()) return;
@@ -608,7 +668,7 @@ export class TaskNavigationView extends ItemView {
     row.addEventListener("dragstart", event => {
       if (!event.dataTransfer) return;
       this.pressed = false;
-      this.dragging = { group: "projects", key: drawn.path, x: event.clientX };
+      this.dragging = { group: "projects", key: drawn.path, x: event.clientX, favorite: `project:${drawn.path}` };
       event.dataTransfer.setData(NAV_DRAG_TYPE, drawn.path);
       event.dataTransfer.effectAllowed = "move";
       for (const moving of this.projectBlock(rows, drawn)) moving.row.addClass("is-being-dragged");
@@ -883,7 +943,7 @@ export class TaskNavigationView extends ItemView {
   }
 
   private get dragManager(): DragManager | undefined {
-    const manager = (this.app as unknown as { dragManager?: Partial<DragManager> }).dragManager;
+    const manager = (this.app as unknown as { dragManager?: Partial<DragManager> } | undefined)?.dragManager;
     return manager && typeof manager.handleDrag === "function" && typeof manager.handleDrop === "function" ? manager as DragManager : undefined;
   }
 
