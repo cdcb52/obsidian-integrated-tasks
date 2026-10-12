@@ -78,12 +78,14 @@ You rarely type the syntax yourself. When you add or edit a task in a task view,
 | **Upcoming** | Look ahead at future tasks, grouped by date. |
 | **All Tasks** | See every open task in your vault, including those without dates. |
 | **Projects** | Review your projects and their progress, as a list or a Gantt chart. |
-| **Tags** | Bring related tasks together across notes. |
+| **A tag** | Bring related tasks together across notes: click a tag in the task sidebar. |
 | **Smart lists** | Return to your own saved views, such as "Quick wins" or "Waiting on others". |
 
 Today and Upcoming use a task's scheduled date or its deadline, whichever comes first. Tasks with neither stay in All Tasks, their projects and their notes.
 
 Press **Cmd/Ctrl+K** in a task view (or run **Quick switch to view, project, tag, or task**) to jump to any view, project, tag, smart list or open task by typing its name.
+
+The task sidebar lists these views with your smart lists, projects, tags and, with **Show files in sidebar**, your vault's files. Right-click anything in it and choose **Add to favorites** to keep it under **Favorites** at the top. Drag items to put them in your own order under their heading, files and folders too; the file tree then follows **Custom order** under **Change sort order**. Click the **Tags** heading to fold your tags away.
 
 ### Filter, sort and group
 
@@ -149,7 +151,7 @@ parent: "[[Studio Admin]]"
 description: A short novel, drafted over the winter.
 ```
 
-You don't have to edit them by hand: the **…** beside a project's title, or a right-click on it in the Projects list, sets its status, priority, dates, deadline, parent, tags, colour and name, and can open or delete it. Subprojects appear under their parent, where you can fold them away, and use its colour unless they have their own. **Convert to project** adds all of these properties, empty, for you to fill in.
+You don't have to edit them by hand: the **…** beside a project's title, or a right-click on it in the Projects list or the task sidebar, sets its status, priority, dates, deadline, parent, tags, colour and name, and can open or delete it. Subprojects appear under their parent, where you can fold them away, and use its colour unless they have their own. **Convert to project** adds all of these properties, empty, for you to fill in.
 
 ![A project page with its sections, start and end dates, deadline and progress, and the selected task in the sidebar](resources/images/project-page.png)
 

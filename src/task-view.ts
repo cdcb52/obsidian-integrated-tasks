@@ -1,6 +1,6 @@
 import { taskTitleLabel } from "./task-title";
 import { splitDestination } from "./structure";
-import { activeProjects, projectStatuses, renderProjectProgress } from "./project-progress";
+import { projectStatuses, renderProjectProgress } from "./project-progress";
 import { renderProjectHeaderDetails } from "./project-header-details";
 import { renderTaskDetails } from "./task-row-details";
 import { renderThingsProjectDetails, renderThingsTaskDetails } from "./things-row-details";
@@ -15,14 +15,14 @@ export { NEW_TASK_ID };
 import type { TaskEditorProperty } from "./task-editor";
 import type { ProjectDraft } from "./project-creator";
 import { draftFromTask, draftFromTitle, draftMatchesTask } from "./task-draft";
-import { openDatePopover } from "./date-popover";
-import { openActionMenu, openTagsPopover, openTaskMenu, priorityIcons } from "./task-menu";
+import { openActionMenu, openTaskMenu } from "./task-menu";
 import { openConfirm } from "./confirm-modal";
-import { dismissPopovers, openChoicePopover, PRIORITY_CHOICES, type Choice } from "./choice-popover";
+import { openProjectMenu, openProjectProperty } from "./project-menu";
+import { dismissPopovers, openChoicePopover } from "./choice-popover";
 import type { BulkTaskPatch } from "./bulk-tasks";
 import { parseTaskInput } from "./parser";
 import { TaskSelection } from "./task-selection";
-import { PROJECT_COLORS, projectColorValue, updateProjectDates } from "./project-properties";
+import { updateProjectDates } from "./project-properties";
 import { renderGantt } from "./gantt-view";
 import { ganttYearStart, GANTT_MAX_SCALE, GANTT_MIN_SCALE, GANTT_ZOOMS, type GanttZoom } from "./gantt";
 
@@ -206,7 +206,6 @@ export class TaskMainView extends ItemView {
   get hasCalendar(): boolean {
     if (this.layout !== "calendar") return false;
     if (this.isProjectsView) return false;
-    if (this.state.mode === "tags" && !this.state.tag) return false;
     if (this.state.mode === "smartLists" && !this.plugin.settings.smartLists.some(list => list.id === this.state.smartListId)) return false;
     return true;
   }
@@ -349,6 +348,8 @@ export class TaskMainView extends ItemView {
     this.state.pagePath = typeof state.pagePath === "string" ? state.pagePath : undefined;
     this.state.markdownState = state.markdownState && typeof state.markdownState === "object" ? state.markdownState as Record<string, unknown> : undefined;
     this.state.projectPath = typeof state.projectPath === "string" ? state.projectPath : undefined;
+    // There is no list of tags any more (the task sidebar lists them): a tab left on it shows All Tasks.
+    if (this.state.mode === "tags" && !this.state.tag && !this.state.pagePath) this.state.mode = "all";
     // File-backed task views must participate in normal same-tab navigation.
     this.navigation = Boolean(this.pagePath);
     // Each view opens with the View options it was left with (a tab saved before they were kept may still say whether it showed projects).
@@ -548,11 +549,6 @@ export class TaskMainView extends ItemView {
     }
     if (this.state.mode === "smartLists" && !this.plugin.settings.smartLists.some(list => list.id === this.state.smartListId)) {
       container.createDiv({ cls: "tm-empty", text: "This smart list no longer exists." });
-      return;
-    }
-    if (this.state.mode === "tags" && !this.state.tag) {
-      container.classList.remove("is-calendar-view", "is-kanban-view");
-      this.renderTagList(container);
       return;
     }
     const viewOptions = this.renderHeader(container);
@@ -909,11 +905,6 @@ export class TaskMainView extends ItemView {
   private renderHeader(container: HTMLElement): HTMLButtonElement {
     const header = container.createDiv({ cls: "tm-view-header" });
     const titleGroup = header.createDiv({ cls: "tm-title-group" });
-    if (this.state.mode === "tags" && this.state.tag) {
-      const back = titleGroup.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "Back to tags" } });
-      setIcon(back, "arrow-left");
-      back.addEventListener("click", () => void this.plugin.openTaskView({ mode: "tags" }));
-    }
     if (this.state.projectPath && !this.state.pagePath) {
       const back = titleGroup.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "Back to projects" } });
       setIcon(back, "arrow-left");
@@ -1102,49 +1093,10 @@ export class TaskMainView extends ItemView {
     if (project && button) this.openProjectMenu(project, button);
   }
 
-  private projectDraft(project: Project): ProjectDraft { return this.plugin.projectDraft(project); }
-
-  /** Saves a change to a project's properties; a failure shows as a notice. */
-  private updateProject(project: Project, change: (draft: ProjectDraft) => ProjectDraft): void {
-    void this.plugin.updateProject(project.path, change).catch((cause: unknown) => {
-      new Notice(cause instanceof Error ? cause.message : "Could not update the project.");
-    });
-  }
-
-  /**
-   * The project's actions, like a task's: priority at once; status, dates, parent, tags, colour and name in popovers
-   * beside the menu; its description (on its page); open its note, or delete it.
-   */
+  /** The project's actions (its "…" button, or a right-click on its row); on its own page they edit its description too. */
   private openProjectMenu(project: Project, anchor: HTMLElement, at?: { x: number; y: number }): void {
-    const rect = anchor.getBoundingClientRect();
-    const beside = (property: keyof ProjectDraft) => (target: HTMLElement): void => this.openProjectProperty(project, property, target, true, () => menu.close());
-    // The button reads as pressed while its menu is open.
-    anchor.setAttribute("aria-expanded", "true");
-    const menu = openActionMenu({
-      doc: anchor.ownerDocument, at: at ?? { x: rect.left, y: rect.bottom + 4 }, label: "Project actions", returnFocus: anchor,
-      onClose: () => anchor.setAttribute("aria-expanded", "false"),
-      entries: [
-        { kind: "icons", label: "Priority", key: "p", buttons: priorityIcons(project.priority, priority => this.updateProject(project, draft => ({ ...draft, priority: priority ? String(priority) : "" }))) },
-        { kind: "separator" },
-        { kind: "submenu", label: "Status", icon: project.status ? STATUS_ICONS[project.status] : "circle-dashed", key: "s", open: beside("status") },
-        { kind: "submenu", label: "Start date", icon: "calendar", key: "d", open: beside("date") },
-        { kind: "submenu", label: "End date", icon: "calendar-check", key: "e", open: beside("endDate") },
-        { kind: "submenu", label: "Deadline", icon: "flag", key: "D", open: beside("deadline") },
-        { kind: "submenu", label: "Parent project", icon: "folder-tree", key: "g", open: beside("parent") },
-        { kind: "submenu", label: "Tags", icon: "tag", key: "t", open: beside("tags") },
-        { kind: "submenu", label: "Color", icon: "palette", key: "c", open: beside("color") },
-        { kind: "submenu", label: "Rename", icon: "pencil", key: "n", open: beside("name") },
-        { kind: "separator" },
-        // The description shows, and is edited, on the project's own page.
-        ...this.taskSourcePath === project.path && this.headerDescription ? [{ kind: "item" as const, label: project.description ? "Edit description" : "Add description", icon: "align-left",
-          run: () => this.editDescription(project) }] : [],
-        { kind: "item", label: "Open note", icon: "file-text", run: () => {
-          const file = this.app.vault.getAbstractFileByPath(project.path);
-          if (file instanceof TFile) void this.app.workspace.getLeaf("tab").openFile(file);
-        } },
-        { kind: "separator" },
-        { kind: "item", label: "Delete project", icon: "trash-2", danger: true, run: () => this.confirmDeleteProject(project) }
-      ]
+    openProjectMenu(this.plugin, project, anchor, {
+      at, editDescription: this.taskSourcePath === project.path && this.headerDescription ? () => this.editDescription(project) : undefined
     });
   }
 
@@ -1198,79 +1150,9 @@ export class TaskMainView extends ItemView {
     });
   }
 
-  private confirmDeleteProject(project: Project): void {
-    const tasks = project.openTasks + project.completedTasks;
-    openConfirm(this.app, {
-      title: `Delete “${project.name}”?`,
-      message: `Its note${tasks ? `, with ${tasks} task${tasks === 1 ? "" : "s"},` : ""} moves to the trash. Subprojects keep their notes.`,
-      confirm: "Delete project", danger: true,
-      run: () => void this.plugin.deleteProject(project.path).catch((cause: unknown) => { new Notice(cause instanceof Error ? cause.message : "Could not delete the project."); })
-    });
-  }
-
-  /** A project property's popover beside `anchor` (the property itself, or a menu row): a date, priority, parent, tags, colour or name. */
+  /** A project property's popover beside `anchor` (by default what has focus), as its menu opens them. */
   private openProjectProperty(project: Project, property: keyof ProjectDraft, anchor = this.popoverAnchor() ?? this.content, beside = false, done?: () => void): void {
-    if (!anchor) return;
-    const current = this.projectDraft(project);
-    const save = (change: (draft: ProjectDraft) => ProjectDraft): void => { done?.(); this.updateProject(project, change); };
-    if (property === "date" || property === "endDate" || property === "deadline") {
-      const label = property === "date" ? "Start date" : property === "endDate" ? "End date" : "Deadline";
-      const value = property === "date" ? project.scheduledDate : property === "endDate" ? project.endDate : project.deadline;
-      openDatePopover({
-        anchor, beside, kind: "date", label, dateFormat: this.plugin.dateFormat(), value: { date: value },
-        // The note stores dates in the vault's format; the editor reads ISO dates too.
-        save: next => save(draft => ({ ...draft, [property]: next.date ?? "" }))
-      });
-    } else if (property === "priority") {
-      openChoicePopover({ anchor, beside, label: "Priority", choices: PRIORITY_CHOICES, cycleKey: "p", selected: current.priority, choose: value => save(draft => ({ ...draft, priority: value })) });
-    } else if (property === "status") {
-      const choices: Choice[] = TASK_STATUSES.map(status => ({ value: status, label: STATUS_LABELS[status], icon: STATUS_ICONS[status] }));
-      choices.push({ value: "", label: "No status", separated: true });
-      openChoicePopover({ anchor, beside, label: "Status", choices, cycleKey: "s", selected: project.status ?? "", choose: value => save(draft => ({ ...draft, status: value })) });
-    } else if (property === "parent") {
-      // Not the project itself, nor one of its subprojects: a project cannot sit inside itself.
-      const projects = this.plugin.index.projects();
-      const inside = (candidate: Project): boolean => {
-        for (let path: string | undefined = candidate.path, depth = 0; path && depth < 50; depth++) {
-          if (path === project.path) return true;
-          path = projects.find(item => item.path === path)?.parentPath;
-        }
-        return false;
-      };
-      const choices: Choice[] = activeProjects(projects).filter(item => !inside(item)).sort((a, b) => a.name.localeCompare(b.name))
-        .map(item => ({ value: item.path, label: item.name, icon: "circle", color: item.color }));
-      choices.push({ value: "", label: "No parent", separated: true });
-      openChoicePopover({ anchor, beside, label: "Parent project", choices, selected: current.parent, input: { placeholder: "Find a project", filter: true },
-        choose: value => save(draft => ({ ...draft, parent: value })) });
-    } else if (property === "tags") {
-      const own = current.tags.split(/[,\s]+/).filter(Boolean);
-      // Other projects' tags are the ones to offer.
-      const vault = [...new Set(this.plugin.index.projects().filter(item => item.path !== project.path)
-        .flatMap(item => this.projectDraft(item).tags.split(/[,\s]+/)).filter(tag => tag && !own.includes(tag)))].sort((a, b) => a.localeCompare(b));
-      let tags = own;
-      const write = (): void => this.updateProject(project, draft => ({ ...draft, tags: tags.join(", ") }));
-      openTagsPopover({
-        anchor, beside, tags: [...own.map(name => ({ name, state: "all" as const })), ...vault.map(name => ({ name, state: "none" as const }))],
-        // Frontmatter tags have no spaces: a typed "open house" becomes "open-house".
-        toggle: (tag, on) => { tags = on ? [...new Set([...tags, tag])] : tags.filter(item => item !== tag); write(); },
-        add: added => { tags = [...new Set([...tags, ...added.map(tag => tag.replace(/\s+/g, "-"))])]; write(); }
-      });
-    } else if (property === "color") {
-      const choices: Choice[] = PROJECT_COLORS.map(color => ({ value: color, label: color[0].toUpperCase() + color.slice(1), icon: "circle", color: projectColorValue(color) }));
-      choices.push({ value: "", label: "No color", separated: true });
-      openChoicePopover({
-        anchor, beside, label: "Color", choices, selected: current.color,
-        input: { placeholder: "Find a color, or type a hex such as #3b82f6", filter: true,
-          parse: text => /^#?(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(text) ? { value: `#${text.replace(/^#/, "").toLowerCase()}`, label: `Use #${text.replace(/^#/, "").toLowerCase()}` } : undefined },
-        choose: value => save(draft => ({ ...draft, color: value }))
-      });
-    } else if (property === "name") {
-      openChoicePopover({
-        anchor, beside, label: "Rename project", choices: [],
-        input: { placeholder: "Project name", value: project.name, invalid: "", parse: text => text && text !== project.name ? { value: text, label: `Rename to “${text}”` } : undefined },
-        choose: name => save(draft => ({ ...draft, name }))
-      });
-    }
+    if (anchor) openProjectProperty(this.plugin, project, property, anchor, beside, done);
   }
 
   private renderHeaderMetadata(): void {
@@ -1447,30 +1329,6 @@ export class TaskMainView extends ItemView {
       const primary = content.createDiv({ cls: "tm-task-primary" });
       primary.createEl("button", { cls: "tm-task-title", text: list.name, attr: { title: list.name } })
         .addEventListener("click", () => void this.plugin.openTaskView({ mode: "smartLists", smartListId: list.id }));
-    }
-  }
-
-  private renderTagList(container: HTMLElement): void {
-    pageTitle(container, "Tags");
-    const tags = this.plugin.index.tagSummaries();
-    if (!tags.length) {
-      container.createDiv({ cls: "tm-empty", text: "No tags yet. Add a tag to a task to see it here." });
-      return;
-    }
-    const list = container.createDiv({ cls: "tm-task-list", attr: { role: "list" } });
-    const things = this.plugin.settings.style === "things";
-    for (const tag of tags) {
-      const row = list.createDiv({ cls: `tm-task-row tm-project-row${things ? " tm-things-project-row tm-things-tag-row" : ""}`, attr: { role: "listitem" } });
-      const icon = row.createSpan({ cls: "tm-project-icon" });
-      setIcon(icon, "tag");
-      const content = row.createDiv({ cls: "tm-task-content" });
-      // Things: one line, with the open count boxed after the name and the completed count at the end.
-      const line = things ? content.createDiv({ cls: "tm-task-primary" }) : content;
-      const title = line.createEl("button", { cls: "tm-task-title", text: tag.name, attr: { "data-tm-focus-key": `tag:${tag.name}` } });
-      title.addEventListener("click", () => void this.plugin.openTag(tag.name).catch(error => new Notice(String(error))));
-      if (!things) { content.createDiv({ cls: "tm-task-metadata", text: `${tag.openTasks} open · ${tag.completedTasks} completed` }); continue; }
-      if (tag.openTasks) line.createSpan({ cls: "tm-things-count", text: String(tag.openTasks), attr: { title: `${tag.openTasks} open` } });
-      if (tag.completedTasks) line.createSpan({ cls: "tm-things-trailing tm-things-tag-done", text: `${tag.completedTasks} completed` });
     }
   }
 

@@ -83,6 +83,19 @@
 /* Hover and the open item look as the file explorer's do, in the theme's own colours. */
 .tm-navigation .tm-nav-item:hover { background: var(--nav-item-background-hover, var(--background-modifier-hover)); }
 .tm-navigation .tm-nav-item.is-active { background: var(--nav-item-background-active, var(--background-modifier-hover)); color: var(--nav-item-color-active, var(--text-normal)); }
+/* An item dragged to a new place: it fades where it was, and a line in the accent colour shows where it goes. */
+.tm-navigation .tm-nav-item.is-being-dragged { opacity: 0.5; }
+.tm-navigation .tm-nav-item:is(.tm-nav-drop-before, .tm-nav-drop-after)::after {
+  content: "";
+  position: absolute;
+  inset-inline: calc(8px + var(--tm-nav-depth, 0) * 16px) 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--interactive-accent);
+  pointer-events: none;
+}
+.tm-navigation .tm-nav-item.tm-nav-drop-before::after { top: -1px; }
+.tm-navigation .tm-nav-item.tm-nav-drop-after::after { bottom: -1px; }
 /* A task dragged over a list that takes it, as in Things: the list lights up in the accent colour. */
 .tm-navigation .tm-nav-item.is-drop-target { background: var(--interactive-accent); color: var(--text-on-accent); }
 .tm-navigation .tm-nav-item.is-drop-target .tm-nav-icon, .tm-navigation .tm-nav-item.is-drop-target .tm-nav-count,
@@ -2127,11 +2140,6 @@ button.tm-editor-property.is-p3 .tm-editor-property-icon { color: var(--color-bl
 .tm-main-view.tm-style-things.tm-density-compact .tm-task-row.tm-things-project-row { padding-top: 3px; padding-bottom: 3px; }
 /* Like a task's checkbox, the icon sits in the middle of the whole row, even when a parent line shows below. */
 .tm-main-view.tm-style-things .tm-things-project-row > .tm-project-icon { align-self: center; justify-self: center; height: 1.4em; font-size: var(--font-ui-medium); }
-/* Tag rows: a quieter icon and name than projects, and the completed count at the end of the line. */
-.tm-main-view.tm-style-things .tm-things-tag-row > .tm-project-icon { color: var(--text-faint); }
-.tm-main-view.tm-style-things .tm-things-tag-row > .tm-project-icon svg { width: 14px; height: 14px; }
-.tm-main-view.tm-style-things .tm-things-tag-row .tm-task-primary > button.tm-task-title { font-weight: var(--font-medium); }
-.tm-things-tag-done { color: var(--text-faint); font-size: var(--font-ui-smaller); white-space: nowrap; }
 .tm-main-view.tm-style-things .tm-things-project-row .tm-task-content { display: flex; flex-direction: column; gap: 1px; padding: 0; min-width: 0; font-family: var(--font-interface); }
 .tm-main-view.tm-style-things .tm-things-project-row .tm-task-primary { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; min-width: 0; }
 .tm-main-view.tm-style-things .tm-things-project-row .tm-task-primary > * { flex-shrink: 0; }

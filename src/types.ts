@@ -155,6 +155,12 @@ export interface SavedViewOptions {
 
 export type FileSortOrder = "alphabetical" | "alphabeticalReverse" | "byModifiedTime" | "byModifiedTimeReverse" | "byCreatedTime" | "byCreatedTimeReverse";
 
+/**
+ * The order the task sidebar's items were dragged into: projects by path, tags by name, and each folder's files and
+ * folders by name (keyed by the folder's path, "/" for the vault's top). What is not listed follows, in the usual order.
+ */
+export interface NavOrder { projects: string[]; tags: string[]; files: Record<string, string[]> }
+
 export interface TaskManagerSettings {
   smartLists: SmartList[];
   taskMode: boolean;
@@ -183,6 +189,15 @@ export interface TaskManagerSettings {
   showFiles: boolean;
   /** How the sidebar's file tree orders files, named as the file explorer names its orders. */
   fileSortOrder: FileSortOrder;
+  /** The file tree follows the order its files were dragged into (navOrder.files), then fileSortOrder. */
+  customFileOrder: boolean;
+  /**
+   * The task sidebar's Favorites, in order: a list ("mode:today"), a smart list ("list:<id>"), a project
+   * ("project:<path>"), a tag ("tag:<name>"), a file ("file:<path>") or a folder ("folder:<path>").
+   */
+  favorites: string[];
+  /** The order the task sidebar's projects, tags and files were dragged into. */
+  navOrder: NavOrder;
   /** How task lists and task properties look, after the app each style is modelled on. */
   style: "griply" | "things";
   /**
@@ -231,6 +246,9 @@ export const DEFAULT_SETTINGS: TaskManagerSettings = {
   density: "compact",
   showFiles: true,
   fileSortOrder: "alphabetical",
+  customFileOrder: false,
+  favorites: [],
+  navOrder: { projects: [], tags: [], files: {} },
   style: "griply",
   taskDetails: "sidebar",
   completionDates: true,

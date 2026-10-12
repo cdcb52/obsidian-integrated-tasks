@@ -19,7 +19,7 @@ type SwitcherHost = Pick<TaskManagerPlugin, "index" | "settings" | "openTaskView
 const VIEWS: Array<[TaskViewMode, string, string]> = [
   ["inbox", "Inbox", "inbox"], ["today", "Today", "calendar-check"],
   ["upcoming", "Upcoming", "calendar-days"], ["all", "All tasks", "list-checks"], ["projects", "Projects", "target"],
-  ["tags", "Tags", "tags"], ["smartLists", "Smart lists", "list-filter"]
+  ["smartLists", "Smart lists", "list-filter"]
 ];
 
 const noteName = (path: string): string => path.slice(path.lastIndexOf("/") + 1).replace(/\.md$/i, "");

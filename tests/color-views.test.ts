@@ -167,14 +167,15 @@ it("lays the navigation out like Things: coloured lists in groups, counts for In
   const rows = (group: HTMLElement) => (Array.from(group.children) as HTMLElement[]).filter(row => row.classList.contains("tm-nav-item")).map(row =>
     [row.querySelector(".tm-nav-label")!.textContent, row.className.match(/is-(blue|yellow|red|cyan|green|purple|section)/)?.[1], row.querySelector(".tm-nav-count")?.textContent]);
   expect(groups.map(rows)).toEqual([
+    [["Favorites", "section", undefined]],
     [["Inbox", "blue", "1"]],
     [["Today", "yellow", "3"], ["Upcoming", "red", undefined], ["All Tasks", "cyan", undefined]],
     [["Projects", "section", undefined]], [["Tags", "section", undefined]]
   ]);
   // All Tasks folds its smart lists away from its chevron; they start open.
-  const all = groups[1].querySelector<HTMLElement>("[data-tm-nav-key='mode:all']")!.closest<HTMLElement>(".tm-nav-item")!;
+  const all = groups[2].querySelector<HTMLElement>("[data-tm-nav-key='mode:all']")!.closest<HTMLElement>(".tm-nav-item")!;
   expect(all.querySelector(".tm-nav-collapse")!.getAttribute("aria-expanded")).toBe("true");
-  expect(Array.from(groups[1].querySelectorAll(".tm-nav-children .tm-nav-label")).map(label => label.textContent)).toEqual(["Calls"]);
+  expect(Array.from(groups[2].querySelectorAll(".tm-nav-children .tm-nav-label")).map(label => label.textContent)).toEqual(["Calls"]);
   // The open tag's section unfolds, its tags counting their open tasks.
   const tag = view.containerEl.querySelector<HTMLElement>(".tm-nav-section .tm-nav-children .tm-nav-item.is-active")!;
   expect([tag.querySelector(".tm-nav-label")!.textContent, tag.querySelector(".tm-nav-count")!.textContent]).toEqual(["home", "2"]);

@@ -78,7 +78,7 @@ describe("quick switcher items", () => {
     const plugin = host();
     const items = switcherItems(plugin as unknown as TaskManagerPlugin);
     expect(items.map(item => `${item.kind}:${item.label}`)).toEqual([
-      "view:Inbox", "view:Today", "view:Upcoming", "view:All tasks", "view:Projects", "view:Tags", "view:Smart lists",
+      "view:Inbox", "view:Today", "view:Upcoming", "view:All tasks", "view:Projects", "view:Smart lists",
       "project:Launch", "project:Shipped", "project:Old", "tag:#work", "smartList:Focus", "task:Task 0", "task:Task 1"
     ]);
     expect(items.find(item => item.label === "Old")).toMatchObject({ status: "cancelled" });

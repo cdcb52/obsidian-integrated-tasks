@@ -35,6 +35,8 @@ import { TaskManagerSettingTab } from "./settings";
 import { addProjectProperties, setProjectDescription } from "./project-properties";
 import { dailyNoteDateFormat } from "./daily-notes";
 import { TaskQuickSwitcher } from "./quick-switcher";
+import { openProjectMenu as showProjectMenu } from "./project-menu";
+import { forgetSidebarPaths, navOrderFrom, renameSidebarPaths } from "./sidebar-order";
 import { TaskSidebarView, TASK_SIDEBAR_VIEW } from "./task-sidebar";
 
 const LEGACY_SETTINGS = ["taskListRowHeight", "taskListRowHeightMultiplier", "hiddenListTaskProperties", "hiddenKanbanTaskProperties", "tasksHeading", "taskDeadlineDisplay", "linkTags", "taskHoverHighlight", "wrapTaskTitles", "wrapCalendarTaskTitles", "wrapKanbanTaskTitles", "showSubtaskCounts", "showGroupTaskCounts", "weeklyReview"];
@@ -92,8 +94,7 @@ export default class TaskManagerPlugin extends Plugin {
       ["today", "Open today", "open-today"],
       ["upcoming", "Open upcoming", "open-upcoming"],
       ["all", "Open all tasks", "open-all-tasks"],
-      ["projects", "Open projects", "open-projects"],
-      ["tags", "Open tags", "open-tags"]
+      ["projects", "Open projects", "open-projects"]
     ];
     for (const [mode, name, id] of commands) {
       this.addCommand({ id, name, callback: () => void this.openTaskView({ mode }).catch((error) => new Notice(String(error))) });
@@ -201,8 +202,8 @@ export default class TaskManagerPlugin extends Plugin {
     });
 
     // Task views store note paths, so they follow renames and close with deleted notes like Markdown tabs.
-    this.registerEvent(this.app.vault.on("rename", (file, oldPath) => { void this.retargetViews(file, oldPath); }));
-    this.registerEvent(this.app.vault.on("delete", file => this.closeDeletedViews(file)));
+    this.registerEvent(this.app.vault.on("rename", (file, oldPath) => { void this.retargetViews(file, oldPath); this.followSidebarPaths(file, oldPath); }));
+    this.registerEvent(this.app.vault.on("delete", file => { this.closeDeletedViews(file); this.followSidebarPaths(file); }));
 
     this.app.workspace.onLayoutReady(() => {
       if (this.unloaded) return;
@@ -346,6 +347,12 @@ export default class TaskManagerPlugin extends Plugin {
     // Files show by default; only an explicit Off hides them.
     this.settings.showFiles = this.settings.showFiles !== false;
     if (!["alphabetical", "alphabeticalReverse", "byModifiedTime", "byModifiedTimeReverse", "byCreatedTime", "byCreatedTimeReverse"].includes(this.settings.fileSortOrder)) this.settings.fileSortOrder = "alphabetical";
+    this.settings.customFileOrder = this.settings.customFileOrder === true;
+    const favorites: unknown = this.settings.favorites;
+    this.settings.favorites = Array.isArray(favorites)
+      ? [...new Set(favorites.filter((key): key is string => typeof key === "string" && /^(mode|list|project|tag|file|folder):./.test(key)))] : [];
+    // A fresh object, never the defaults' own.
+    this.settings.navOrder = navOrderFrom(this.settings.navOrder);
     // Griply is the default; only an explicit Things choice keeps Things.
     this.settings.style = this.settings.style === "things" ? "things" : "griply";
     // Three panes are the default; only an explicit Two panes choice keeps two.
@@ -485,11 +492,13 @@ export default class TaskManagerPlugin extends Plugin {
 
   async deleteSmartList(id: string): Promise<void> {
     const previous = this.settings.smartLists;
+    const favorites = this.settings.favorites;
     this.settings.smartLists = previous.filter(list => list.id !== id);
+    this.settings.favorites = favorites.filter(key => key !== `list:${id}`);
     delete this.settings.viewLayouts[`smartList:${id}`];
     delete this.settings.viewPeriods[`smartList:${id}`];
     try { await this.saveSettings(); }
-    catch (cause) { this.settings.smartLists = previous; throw cause; }
+    catch (cause) { this.settings.smartLists = previous; this.settings.favorites = favorites; throw cause; }
     for (const leaf of this.app.workspace.getLeavesOfType(TASK_MAIN_VIEW)) {
       if (leaf.view.getState().smartListId === id) await leaf.setViewState({ type: TASK_MAIN_VIEW, state: { mode: "smartLists" } });
     }
@@ -499,6 +508,36 @@ export default class TaskManagerPlugin extends Plugin {
   private refreshSmartLists(): void {
     this.refreshNavigation();
     this.refreshViews();
+  }
+
+  /** Whether the task sidebar's Favorites holds `key` ("mode:today", "list:<id>", "project:<path>", "tag:<name>", "file:<path>" or "folder:<path>"). */
+  isFavorite(key: string): boolean { return this.settings.favorites.includes(key); }
+
+  /** Adds `key` to the end of the task sidebar's Favorites, or takes it out. */
+  async toggleFavorite(key: string): Promise<void> {
+    const previous = this.settings.favorites;
+    this.settings.favorites = previous.includes(key) ? previous.filter(item => item !== key) : [...previous, key];
+    try { await this.saveSettings(); }
+    catch (cause) { this.settings.favorites = previous; throw cause; }
+    this.refreshNavigation();
+  }
+
+  /** A project's actions, as its page's "…" opens them: for a right-click on it in the task sidebar, at the pointer. */
+  openProjectMenu(path: string, anchor: HTMLElement, at?: { x: number; y: number }): void {
+    const project = this.index.projects().find(item => item.path === path);
+    if (project) showProjectMenu(this, project, anchor, { at });
+  }
+
+  /** The task sidebar's favorites and orders follow a renamed note or folder (`oldPath`), and let go of a deleted one. */
+  private followSidebarPaths(file: TAbstractFile, oldPath?: string): void {
+    const folder = file instanceof TFolder;
+    const next = oldPath === undefined ? forgetSidebarPaths(this.settings, file.path, folder)
+      : renameSidebarPaths(this.settings, oldPath, file.path, folder, path => this.app.vault.getAbstractFileByPath(path) instanceof TFolder);
+    if (!next) return;
+    this.settings.favorites = next.favorites;
+    this.settings.navOrder = next.navOrder;
+    void this.saveSettings().catch(error => new Notice(String(error)));
+    this.refreshNavigation();
   }
 
   refreshNavigation(): void {

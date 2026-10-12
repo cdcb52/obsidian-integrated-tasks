@@ -1,9 +1,10 @@
 import { ItemView, Keymap, Menu, Notice, setIcon, TFile, TFolder, type TAbstractFile, type WorkspaceLeaf } from "obsidian";
 import type TaskManagerPlugin from "./main";
-import type { FileSortOrder, TaskManagerSettings, TaskViewMode } from "./types";
+import type { FileSortOrder, Project, TaskManagerSettings, TaskViewMode } from "./types";
 import { activeProjects, renderProjectProgress } from "./project-progress";
 import { projectHierarchy } from "./project-hierarchy";
 import { activeTaskDrag, highlightDropTarget, markDropTarget, TASK_DRAG_TYPE, type SidebarDrop } from "./sidebar-drop";
+import { inOrder, moveKey } from "./sidebar-order";
 
 export const TASK_NAV_VIEW = "task-manager-navigation";
 
@@ -29,12 +30,13 @@ export function listGlyph(mode: TaskViewMode, style: TaskManagerSettings["style"
   return entry && { icon: (style === "griply" && entry.griplyIcon) || entry.icon, color: entry.color };
 }
 
-/** What folds away from a chevron: smart lists under All Tasks, and the sections below the lists (each a heading over
- * its items). */
-type NavSection = "smartLists" | "projects" | "tags" | "files";
-const NAV_SECTIONS: Array<{ section: NavSection; label: string; icon: string; open: TaskViewMode }> = [
+/** What folds away from a chevron: Favorites, smart lists under All Tasks, and the sections below the lists (each a
+ * heading over its items). */
+type NavSection = "favorites" | "smartLists" | "projects" | "tags" | "files";
+/** The sections below the lists. The Projects heading opens the Projects view; the Tags heading only folds its tags. */
+const NAV_SECTIONS: Array<{ section: "projects" | "tags"; label: string; icon: string; open?: TaskViewMode }> = [
   { section: "projects", label: "Projects", icon: "square-chart-gantt", open: "projects" },
-  { section: "tags", label: "Tags", icon: "tag", open: "tags" }
+  { section: "tags", label: "Tags", icon: "tag" }
 ];
 /** The icon a file shows by its kind, as the file explorer would name them. */
 const FILE_ICONS: Record<string, string> = {
@@ -56,10 +58,10 @@ const FILE_SORT_ORDERS: Array<[FileSortOrder, string, string]> = [
 ];
 
 /** `files` in `order`, folders first. Folders have no times, so they go by name, backwards only in Z to A. */
-export function sortFiles(files: TAbstractFile[], order: FileSortOrder): TAbstractFile[] {
+export function sortFiles(files: TAbstractFile[], order: FileSortOrder, custom: string[] = []): TAbstractFile[] {
   const byName = (a: TAbstractFile, b: TAbstractFile): number => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
   const time = (file: TAbstractFile): number => file instanceof TFile ? order.startsWith("byCreated") ? file.stat.ctime : file.stat.mtime : 0;
-  return [...files].sort((a, b) => {
+  const sorted = [...files].sort((a, b) => {
     const folders = Number(b instanceof TFolder) - Number(a instanceof TFolder);
     if (folders) return folders;
     if (order === "alphabetical") return byName(a, b);
@@ -67,6 +69,8 @@ export function sortFiles(files: TAbstractFile[], order: FileSortOrder): TAbstra
     if (a instanceof TFolder) return byName(a, b);
     return (order.endsWith("Reverse") ? time(a) - time(b) : time(b) - time(a)) || byName(a, b);
   });
+  // Dragged into place (`custom`, by name), folders and files mix; what was not dragged follows in `order`.
+  return inOrder(sorted, custom, file => file.name);
 }
 /** What Obsidian's drag manager carries: a file or folder, or several from the file explorer. */
 interface Draggable { type: string; file?: TAbstractFile; files?: TAbstractFile[] }
@@ -81,19 +85,28 @@ interface DragManager {
 }
 const NAV_MODES = new Set<TaskViewMode>([...NAV_GROUPS.flat().map(entry => entry.mode), "projects", "tags"]);
 
+/** A row's icon, its colour, its count of open tasks, and whether what it folds is open (for a row whose click folds). */
+interface NavItemOptions { icon?: string; color?: string; count?: number; expanded?: boolean }
+/** Where a dragged item goes: before or after the row it is over, or (a folder's middle) into it. */
+type DropPlace = "before" | "after" | "into";
+/** Where in the sidebar a file row is: the Files tree, or Favorites (a favourite folder's files). Renaming happens in one. */
+type FileScope = "files" | "favorites";
+/** The type a sidebar item drags with while it moves to a new place: its own, so it drops nowhere else (not into a note as text). */
+const NAV_DRAG_TYPE = "application/x-task-manager-nav-item";
+
 export class TaskNavigationView extends ItemView {
   private activeMode: TaskViewMode = "today";
   private activeTag?: string;
   private activeSmartList?: string;
   private activeProject?: string;
-  /** Sections shown open; Things lists its projects, so smart lists and projects start open. */
-  private expanded = new Set<NavSection>(["smartLists", "projects", "files"]);
+  /** Sections shown open; Things lists its projects, so Favorites, smart lists and projects start open. */
+  private expanded = new Set<NavSection>(["favorites", "smartLists", "projects", "files"]);
   /** Parent projects whose subprojects are folded away. */
   private foldedProjects = new Set<string>();
   /** Folders shown open in the file tree; kept with the sidebar's layout. */
   private openFolders = new Set<string>();
-  /** The file or folder being renamed in place, and the name typed so far. */
-  private renaming?: { path: string; value: string; selected: boolean };
+  /** The file or folder being renamed in place (in the file tree or in Favorites), and the name typed so far. */
+  private renaming?: { path: string; value: string; selected: boolean; scope: FileScope };
   /** True while the list is rebuilt, when a rename field losing focus is not the user leaving it. */
   private rebuilding = false;
   private fileEvents = false;
@@ -107,6 +120,8 @@ export class TaskNavigationView extends ItemView {
   private renderAfterPress = false;
   private releaseTimer?: number;
   private closed = false;
+  /** The item being dragged to a new place, and the rows it can go among (see sortable); the list waits for the drop. */
+  private dragging?: { group: string; key: string };
   // The toolbar is one tab stop; arrow keys move between its buttons.
   private toolbarFocus = 0;
   constructor(leaf: WorkspaceLeaf, private readonly plugin: TaskManagerPlugin) { super(leaf); }
@@ -153,6 +168,9 @@ export class TaskNavigationView extends ItemView {
     this.registerDomEvent(this.containerEl, "pointerdown", () => { this.pressed = true; });
     this.registerDomEvent(this.containerEl.win, "pointerup", release, true);
     this.registerDomEvent(this.containerEl.win, "pointercancel", release, true);
+    // A drag that ends anywhere (dropped elsewhere, or let go) takes its drop line with it.
+    this.registerDomEvent(this.containerEl.win, "dragend", () => this.endDrag(), true);
+    this.registerDomEvent(this.containerEl.win, "drop", () => this.showDropLine(), true);
     syncActive();
     this.render();
   }
@@ -190,10 +208,13 @@ export class TaskNavigationView extends ItemView {
     this.frame = undefined;
   }
 
+  private get settings(): TaskManagerSettings { return this.plugin.settings; }
+
   private render(): void {
     this.cancelRender();
     if (this.closed) return;
-    if (this.pressed) { this.renderAfterPress = true; return; }
+    // Rebuilding the list mid-press, or mid-drag, would take away the row being pressed or dragged.
+    if (this.pressed || this.dragging) { this.renderAfterPress = true; return; }
     this.renderAfterPress = false;
     const container = this.containerEl.children[1] as HTMLElement;
     // Rebuilding the list would drop keyboard focus and scroll position; restore both afterwards.
@@ -203,8 +224,8 @@ export class TaskNavigationView extends ItemView {
     this.rebuilding = true;
     container.empty();
     container.addClass("tm-navigation");
-    container.classList.toggle("tm-density-compact", this.plugin.settings.density === "compact");
-    container.classList.toggle("tm-style-things", this.plugin.settings.style === "things");
+    container.classList.toggle("tm-density-compact", this.settings.density === "compact");
+    container.classList.toggle("tm-style-things", this.settings.style === "things");
     const header = container.createDiv({ cls: "nav-header tm-nav-header" });
     const toolbar = header.createDiv({ cls: "nav-buttons-container", attr: { role: "toolbar", "aria-label": "Task actions" } });
     const buttons: HTMLButtonElement[] = [];
@@ -235,82 +256,72 @@ export class TaskNavigationView extends ItemView {
     action("New note", "square-pen", () => this.newNote());
     const toggle = action("Task mode", "list-checks", async () => {
       toggle.disabled = true;
-      try { await this.plugin.setTaskMode(!this.plugin.settings.taskMode); }
+      try { await this.plugin.setTaskMode(!this.settings.taskMode); }
       finally { this.render(); }
     });
-    toggle.setAttribute("aria-pressed", String(this.plugin.settings.taskMode));
-    toggle.setAttribute("title", `Task mode: ${this.plugin.settings.taskMode ? "On" : "Off"}`);
-    toggle.classList.toggle("is-active", this.plugin.settings.taskMode);
+    toggle.setAttribute("aria-pressed", String(this.settings.taskMode));
+    toggle.setAttribute("title", `Task mode: ${this.settings.taskMode ? "On" : "Off"}`);
+    toggle.classList.toggle("is-active", this.settings.taskMode);
     // Folders and their order belong to the file tree, so they show with it.
-    if (this.plugin.settings.showFiles) {
+    if (this.settings.showFiles) {
       action("New folder", "folder-plus", () => this.newFolder(this.app.vault.getRoot()));
       const sort = action("Change sort order", "arrow-up-narrow-wide", () => this.openSortMenu(sort));
     }
     rove(Math.min(this.toolbarFocus, buttons.length - 1));
 
     const nav = container.createDiv({ cls: "nav-files-container tm-nav-list", attr: { "aria-label": "Task navigation" } });
-    /** A row: an icon (its colour set by `color`), the name, and on the right an optional count. */
-    const item = (parent: HTMLElement, key: string, label: string, active: boolean, open: (event: MouseEvent) => Promise<void>, icon?: string, color?: string, count?: number): HTMLElement => {
-      const row = parent.createDiv({ cls: `tree-item-self nav-file-title tm-nav-item${active ? " is-active" : ""}${color ? ` is-${color}` : ""}` });
-      if (icon) {
-        const glyph = row.createDiv({ cls: "tm-nav-icon", attr: { "aria-hidden": "true" } });
-        setIcon(glyph, icon);
-      }
-      const button = row.createEl("button", { cls: "tm-nav-label", text: label, attr: { "aria-current": active ? "page" : "false", title: label, "data-tm-nav-key": key } });
-      button.addEventListener("click", event => { void open(event).catch(error => new Notice(String(error))); });
-      if (count) row.createDiv({ cls: "tm-nav-count", text: String(count), attr: { "aria-label": `${count} open` } });
-      return row;
-    };
-    const listActive = (mode: TaskViewMode): boolean => mode === this.activeMode && !this.activeTag && !this.activeProject && !this.activeSmartList;
-    /** A chevron on `row` that folds `section` away; true while it is open. */
-    const folder = (row: HTMLElement, section: NavSection, label: string): boolean => {
-      const expanded = this.expanded.has(section);
-      this.chevron(row, expanded, label, `collapse:${section}`, () => {
-        if (expanded) this.expanded.delete(section); else this.expanded.add(section);
-      });
-      return expanded;
-    };
+    if (this.settings.showFiles || this.settings.favorites?.some(key => /^(file|folder):/.test(key))) this.watchFiles();
+    this.renderFavorites(nav);
     for (const group of NAV_GROUPS) {
       const lists = nav.createDiv({ cls: "tm-nav-group" });
       for (const entry of group) {
-        const count = entry.count ? this.plugin.index.query({ mode: entry.mode, showCompleted: false }).length : undefined;
-        const glyph = listGlyph(entry.mode, this.plugin.settings.style)!;
-        const row = item(lists, `mode:${entry.mode}`, entry.label, listActive(entry.mode), () => this.plugin.openTaskView({ mode: entry.mode }), glyph.icon, glyph.color, count);
-        if (entry.mode === "inbox" || entry.mode === "today") this.dropTarget(row, { kind: entry.mode });
+        const row = this.listRow(lists, entry.mode, `mode:${entry.mode}`);
         // Smart lists, being saved views of all tasks, sit under All Tasks.
-        if (entry.mode !== "all" || !folder(row, "smartLists", "smart lists")) continue;
+        if (entry.mode !== "all" || !this.folder(row, "smartLists", "smart lists")) continue;
         const children = lists.createDiv({ cls: "tree-item-children nav-folder-children tm-nav-children" });
-        const smartLists = this.plugin.settings.smartLists;
+        const smartLists = this.settings.smartLists;
         // Indented a step under All Tasks, as a subproject is under its parent.
-        for (const list of smartLists) item(children, `list:${list.id}`, list.name, this.activeSmartList === list.id, () => this.plugin.openTaskView({ mode: "smartLists", smartListId: list.id }), SMART_LIST_GLYPH.icon, SMART_LIST_GLYPH.color)
-          .setCssProps({ "--tm-nav-depth": "1" });
+        for (const list of smartLists) {
+          const item = this.smartListRow(children, list.id, `list:${list.id}`);
+          item?.setCssProps({ "--tm-nav-depth": "1" });
+          if (item) this.sortable(item, "smartLists", list.id, (id, target, after) => this.saveOrder(() => {
+            const ids = moveKey(this.settings.smartLists.map(list => list.id), id, target, after);
+            this.settings.smartLists = inOrder(this.settings.smartLists, ids, list => list.id);
+          }));
+        }
         if (!smartLists.length) children.createDiv({ cls: "tm-nav-empty", text: "No smart lists yet" });
       }
     }
 
     for (const { section, label, icon, open } of NAV_SECTIONS) {
       const group = nav.createDiv({ cls: "tree-item nav-folder tm-nav-group tm-nav-section" });
-      const heading = item(group, `mode:${open}`, label, listActive(open), () => this.plugin.openTaskView({ mode: open }), icon, "section");
-      if (!folder(heading, section, label)) { group.addClass("is-folded"); continue; }
+      const heading = open
+        ? this.item(group, `mode:${open}`, label, this.listActive(open), () => this.plugin.openTaskView({ mode: open }), { icon, color: "section" })
+        : this.item(group, section, label, false, () => this.toggleSection(section), { icon, color: "section", expanded: this.expanded.has(section) });
+      if (open) heading.addEventListener("contextmenu", event => this.openItemMenu(event, `mode:${open}`));
+      if (!this.folder(heading, section, label)) { group.addClass("is-folded"); continue; }
       const children = group.createDiv({ cls: "tree-item-children nav-folder-children tm-nav-children" });
       if (section === "projects") {
         const projects = activeProjects(this.plugin.index.projects());
         // The open project's parents stay unfolded, so it shows.
         const byPath = new Map(projects.map(project => [project.path, project]));
         for (let path = byPath.get(this.activeProject ?? "")?.parentPath; path; path = byPath.get(path)?.parentPath) this.foldedProjects.delete(path);
-        const tree = projectHierarchy(projects);
+        const tree = projectHierarchy(projects, this.settings.navOrder?.projects);
         // Subprojects sit under their parent, indented a step per level; a parent folds them away from its chevron.
         let hiddenBelow: number | undefined;
+        // The project each level is under, so a project drags among its parent's subprojects.
+        const parents: string[] = [];
         tree.forEach(({ project, depth }, index) => {
+          parents[depth] = project.path;
           if (hiddenBelow !== undefined && depth > hiddenBelow) return;
           hiddenBelow = undefined;
-          const row = item(children, `project:${project.path}`, project.name, this.activeProject === project.path, event => this.plugin.openProject(project.path, { keepTaskMode: true, newLeaf: Keymap.isModEvent(event) }));
-          this.dropTarget(row, { kind: "project", path: project.path });
+          const row = this.projectRow(children, project, `project:${project.path}`);
           row.style.setProperty("--tm-nav-depth", String(depth));
-          // Its progress, as a pie in its colour, stands where a list's icon does.
-          const icon = row.createDiv({ cls: "tm-nav-icon tm-nav-progress", attr: { "aria-hidden": "true" } });
-          renderProjectProgress(icon, project, false);
-          row.prepend(icon);
+          this.sortable(row, `projects:${depth ? parents[depth - 1] : ""}`, project.path, (path, target, after) => this.saveOrder(() => {
+            // Kept as the tree then reads, parents before their subprojects.
+            const order = moveKey(tree.map(entry => entry.project.path), path, target, after);
+            this.settings.navOrder = { ...this.settings.navOrder, projects: projectHierarchy(projects, order).map(entry => entry.project.path) };
+          }));
           if ((tree[index + 1]?.depth ?? 0) <= depth) return;
           const folded = this.foldedProjects.has(project.path);
           this.chevron(row, !folded, project.name, `collapse:project:${project.path}`, () => {
@@ -320,29 +331,26 @@ export class TaskNavigationView extends ItemView {
         });
         if (!projects.length) children.createDiv({ cls: "tm-nav-empty", text: "No projects yet" });
       } else {
-        const tags = this.plugin.index.tagSummaries();
+        const tags = inOrder(this.plugin.index.tagSummaries(), this.settings.navOrder?.tags ?? [], tag => tag.name);
         for (const tag of tags) {
-          const row = item(children, `tag:${tag.name}`, tag.name, this.activeTag === tag.name, event => this.plugin.openTag(tag.name, { keepTaskMode: true, newLeaf: Keymap.isModEvent(event) }), TAG_GLYPH.icon, TAG_GLYPH.color, tag.openTasks);
-          this.dropTarget(row, { kind: "tag", tag: tag.name });
+          const row = this.tagRow(children, tag, `tag:${tag.name}`);
+          this.sortable(row, "tags", tag.name, (name, target, after) => this.saveOrder(() => {
+            this.settings.navOrder = { ...this.settings.navOrder, tags: moveKey(tags.map(item => item.name), name, target, after) };
+          }));
         }
         if (!tags.length) children.createDiv({ cls: "tm-nav-empty", text: "No tags yet" });
       }
     }
     // The vault's files and folders, below everything else, as the file explorer lists them.
-    if (this.plugin.settings.showFiles) {
-      this.watchFiles();
+    if (this.settings.showFiles) {
       const group = nav.createDiv({ cls: "tree-item nav-folder tm-nav-group tm-nav-section tm-nav-files" });
       const root = this.app.vault.getRoot();
-      const heading = item(group, "files", "Files", false, async () => {
-        if (this.expanded.has("files")) this.expanded.delete("files"); else this.expanded.add("files");
-        this.render();
-      }, "folder-tree", "section");
-      heading.querySelector(".tm-nav-label")?.setAttribute("aria-expanded", String(this.expanded.has("files")));
+      const heading = this.item(group, "files", "Files", false, () => this.toggleSection("files"), { icon: "folder-tree", color: "section", expanded: this.expanded.has("files") });
       heading.addEventListener("contextmenu", event => this.openFileMenu(event, root));
       this.fileDrop(heading, root);
-      if (folder(heading, "files", "files")) {
+      if (this.folder(heading, "files", "files")) {
         const children = group.createDiv({ cls: "tree-item-children nav-folder-children tm-nav-children" });
-        this.renderFolder(children, root, 0, item);
+        this.renderFolder(children, root, 0, "files");
         if (!root.children.length) children.createDiv({ cls: "tm-nav-empty", text: "No files yet" });
       } else group.addClass("is-folded");
     }
@@ -352,10 +360,241 @@ export class TaskNavigationView extends ItemView {
     if (rename) {
       rename.focus({ preventScroll: true });
       if (!this.renaming?.selected) { rename.select(); if (this.renaming) this.renaming.selected = true; }
-    } else if (focusKey) {
-      const target = Array.from(container.querySelectorAll<HTMLElement>("[data-tm-nav-key]")).find(element => element.getAttribute("data-tm-nav-key") === focusKey);
-      target?.focus({ preventScroll: true });
+    } else {
+      // A rename whose row is gone (folded away, or the file deleted) is over.
+      this.renaming = undefined;
+      if (focusKey) {
+        const target = Array.from(container.querySelectorAll<HTMLElement>("[data-tm-nav-key]")).find(element => element.getAttribute("data-tm-nav-key") === focusKey);
+        target?.focus({ preventScroll: true });
+      }
     }
+  }
+
+  /** A row: an icon (its colour set by `color`), the name, and on the right an optional count. */
+  private item(parent: HTMLElement, key: string, label: string, active: boolean, open: (event: MouseEvent) => unknown, options: NavItemOptions = {}): HTMLElement {
+    const { icon, color, count, expanded } = options;
+    const row = parent.createDiv({ cls: `tree-item-self nav-file-title tm-nav-item${active ? " is-active" : ""}${color ? ` is-${color}` : ""}` });
+    if (icon) {
+      const glyph = row.createDiv({ cls: "tm-nav-icon", attr: { "aria-hidden": "true" } });
+      setIcon(glyph, icon);
+    }
+    const button = row.createEl("button", { cls: "tm-nav-label", text: label, attr: {
+      "aria-current": active ? "page" : "false", title: label, "data-tm-nav-key": key, ...expanded === undefined ? {} : { "aria-expanded": String(expanded) }
+    } });
+    button.addEventListener("click", event => { void Promise.resolve(open(event)).catch(error => new Notice(String(error))); });
+    if (count) row.createDiv({ cls: "tm-nav-count", text: String(count), attr: { "aria-label": `${count} open` } });
+    return row;
+  }
+
+  private listActive(mode: TaskViewMode): boolean {
+    return mode === this.activeMode && !this.activeTag && !this.activeProject && !this.activeSmartList;
+  }
+
+  /** A chevron on `row` that folds `section` away; true while it is open. */
+  private folder(row: HTMLElement, section: NavSection, label: string): boolean {
+    const expanded = this.expanded.has(section);
+    this.chevron(row, expanded, label, `collapse:${section}`, () => {
+      if (expanded) this.expanded.delete(section); else this.expanded.add(section);
+    });
+    return expanded;
+  }
+
+  /** Folds or unfolds a section from its heading. */
+  private toggleSection(section: NavSection): void {
+    if (this.expanded.has(section)) this.expanded.delete(section); else this.expanded.add(section);
+    this.render();
+  }
+
+  /** A list's row (Inbox, Today, Upcoming, All Tasks, or Projects in Favorites), which tasks dragged to Inbox and Today drop on. */
+  private listRow(parent: HTMLElement, mode: TaskViewMode, key: string): HTMLElement {
+    const projects = mode === "projects";
+    const entry = NAV_GROUPS.flat().find(item => item.mode === mode);
+    const glyph = projects ? { icon: NAV_SECTIONS[0].icon, color: "muted" } : listGlyph(mode, this.settings.style)!;
+    const count = entry?.count ? this.plugin.index.query({ mode, showCompleted: false }).length : undefined;
+    const row = this.item(parent, key, projects ? NAV_SECTIONS[0].label : entry?.label ?? mode, this.listActive(mode), () => this.plugin.openTaskView({ mode }), { ...glyph, count });
+    if (mode === "inbox" || mode === "today") this.dropTarget(row, { kind: mode });
+    row.addEventListener("contextmenu", event => this.openItemMenu(event, `mode:${mode}`));
+    return row;
+  }
+
+  private smartListRow(parent: HTMLElement, id: string, key: string): HTMLElement | undefined {
+    const list = this.settings.smartLists.find(item => item.id === id);
+    if (!list) return undefined;
+    const row = this.item(parent, key, list.name, this.activeSmartList === list.id, () => this.plugin.openTaskView({ mode: "smartLists", smartListId: list.id }), SMART_LIST_GLYPH);
+    row.addEventListener("contextmenu", event => this.openItemMenu(event, `list:${list.id}`));
+    return row;
+  }
+
+  /** A project's row: its progress pie where a list's icon is, tasks dropping on it, and its actions on a right-click. */
+  private projectRow(parent: HTMLElement, project: Project, key: string): HTMLElement {
+    const row = this.item(parent, key, project.name, this.activeProject === project.path,
+      event => this.plugin.openProject(project.path, { keepTaskMode: true, newLeaf: Keymap.isModEvent(event) }));
+    this.dropTarget(row, { kind: "project", path: project.path });
+    // Its progress, as a pie in its colour, stands where a list's icon does.
+    const icon = row.createDiv({ cls: "tm-nav-icon tm-nav-progress", attr: { "aria-hidden": "true" } });
+    renderProjectProgress(icon, project, false);
+    row.prepend(icon);
+    row.addEventListener("contextmenu", event => {
+      event.preventDefault();
+      const label = row.querySelector<HTMLElement>(".tm-nav-label") ?? row;
+      this.plugin.openProjectMenu(project.path, label, { x: event.clientX, y: event.clientY });
+    });
+    return row;
+  }
+
+  private tagRow(parent: HTMLElement, tag: { name: string; openTasks: number }, key: string): HTMLElement {
+    const row = this.item(parent, key, tag.name, this.activeTag === tag.name,
+      event => this.plugin.openTag(tag.name, { keepTaskMode: true, newLeaf: Keymap.isModEvent(event) }), { ...TAG_GLYPH, count: tag.openTasks });
+    this.dropTarget(row, { kind: "tag", tag: tag.name });
+    row.addEventListener("contextmenu", event => this.openItemMenu(event, `tag:${tag.name}`));
+    return row;
+  }
+
+  /**
+   * Favorites, at the top: any of the sidebar's lists, smart lists, projects, tags, files and folders, added from its
+   * right-click menu, in the order they were added or dragged into. Each works as it does in its own section; a
+   * folder opens in place.
+   */
+  private renderFavorites(nav: HTMLElement): void {
+    const group = nav.createDiv({ cls: "tree-item nav-folder tm-nav-group tm-nav-section tm-nav-favorites" });
+    const heading = this.item(group, "favorites", "Favorites", false, () => this.toggleSection("favorites"), { icon: "star", color: "section", expanded: this.expanded.has("favorites") });
+    if (!this.folder(heading, "favorites", "favorites")) { group.addClass("is-folded"); return; }
+    const children = group.createDiv({ cls: "tree-item-children nav-folder-children tm-nav-children" });
+    let shown = 0;
+    // Looked up once, and only when a favourite needs them.
+    let projects: Map<string, Project> | undefined;
+    let tags: Map<string, { name: string; openTasks: number }> | undefined;
+    const lookup = {
+      project: (path: string) => (projects ??= new Map(this.plugin.index.projects().map(project => [project.path, project]))).get(path),
+      tag: (name: string) => (tags ??= new Map(this.plugin.index.tagSummaries().map(tag => [tag.name, tag]))).get(name)
+    };
+    for (const key of this.settings.favorites ?? []) {
+      const row = this.favoriteRow(children, key, lookup);
+      if (!row) continue;
+      shown++;
+      this.sortable(row, "favorites", key, (favorite, target, after) => this.saveOrder(() => {
+        this.settings.favorites = moveKey(this.settings.favorites, favorite, target, after);
+      }));
+      // A favourite folder lists what is in it, as in the file tree.
+      const folder = this.favoriteFolder(key);
+      if (folder && this.openFolders.has(folder.path)) this.renderFolder(children, folder, 1, "favorites");
+    }
+    if (!shown) children.createDiv({ cls: "tm-nav-empty", text: "Right-click an item to add it here" });
+  }
+
+  private favoriteFolder(key: string): TFolder | undefined {
+    if (!key.startsWith("folder:")) return undefined;
+    const folder = this.app.vault.getAbstractFileByPath(key.slice("folder:".length));
+    return folder instanceof TFolder ? folder : undefined;
+  }
+
+  /** A favourite's row, drawn as in its own section; none when what it names is gone (a tag no task has any more). */
+  private favoriteRow(parent: HTMLElement, key: string, lookup: { project(path: string): Project | undefined; tag(name: string): { name: string; openTasks: number } | undefined }): HTMLElement | undefined {
+    const colon = key.indexOf(":");
+    const [kind, value] = [key.slice(0, colon), key.slice(colon + 1)];
+    const navKey = `favorite:${key}`;
+    if (kind === "mode") return NAV_MODES.has(value as TaskViewMode) && value !== "tags" ? this.listRow(parent, value as TaskViewMode, navKey) : undefined;
+    if (kind === "list") return this.smartListRow(parent, value, navKey);
+    if (kind === "tag") {
+      const tag = lookup.tag(value);
+      return tag && this.tagRow(parent, tag, navKey);
+    }
+    if (kind === "project") {
+      const project = lookup.project(value);
+      return project && this.projectRow(parent, project, navKey);
+    }
+    const file = this.app.vault.getAbstractFileByPath(value);
+    if (kind === "file" && file instanceof TFile) return this.fileRow(parent, file, 0, "favorites", navKey);
+    if (kind === "folder" && file instanceof TFolder && !file.isRoot()) return this.fileRow(parent, file, 0, "favorites", navKey);
+    return undefined;
+  }
+
+  /** A list's, smart list's or tag's menu: adding it to Favorites, or taking it out. */
+  private openItemMenu(event: MouseEvent, key: string): void {
+    event.preventDefault();
+    const menu = new Menu();
+    this.favoriteMenuItem(menu, key);
+    menu.showAtMouseEvent(event);
+  }
+
+  private favoriteMenuItem(menu: Menu, key: string): void {
+    const favorite = this.plugin.isFavorite(key);
+    menu.addItem(entry => entry.setSection("action").setTitle(favorite ? "Remove from favorites" : "Add to favorites").setIcon(favorite ? "star-off" : "star")
+      .onClick(() => { void this.plugin.toggleFavorite(key).catch(error => new Notice(String(error))); }));
+  }
+
+  /** Saves an order changed by a drag (`change` writes it into the settings), and redraws the list in it. */
+  private async saveOrder(change: () => void): Promise<void> {
+    change();
+    this.render();
+    await this.plugin.saveSettings();
+  }
+
+  /**
+   * Lets `row` be dragged to a new place among the other rows of its `group` (Favorites, the smart lists, a parent's
+   * projects, the tags): a line shows where it goes, before or after the row it is over, and `place` moves it there.
+   */
+  private sortable(row: HTMLElement, group: string, key: string, place: (key: string, target: string, after: boolean) => Promise<void>): void {
+    row.setAttribute("draggable", "true");
+    row.addEventListener("dragstart", event => {
+      if (!event.dataTransfer) return;
+      // A drag is no press: the list redraws once it is dropped.
+      this.pressed = false;
+      this.dragging = { group, key };
+      // Its own type, so it does not drop into a note as text.
+      event.dataTransfer.setData(NAV_DRAG_TYPE, key);
+      event.dataTransfer.effectAllowed = "move";
+      row.addClass("is-being-dragged");
+    });
+    const accepts = (): boolean => this.dragging?.group === group && this.dragging.key !== key;
+    row.addEventListener("dragover", event => {
+      if (!accepts()) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+      this.showDropLine(row, this.dropPlace(row, event, false));
+    });
+    row.addEventListener("dragleave", event => { if (!row.contains(event.relatedTarget as Node | null)) this.showDropLine(); });
+    row.addEventListener("drop", event => {
+      if (!accepts()) return;
+      event.preventDefault();
+      const dragged = this.dragging!.key;
+      const after = this.dropPlace(row, event, false) === "after";
+      this.endDrag();
+      void place(dragged, key, after).catch(error => new Notice(String(error)));
+    });
+  }
+
+  /**
+   * Where something dragged over `row` goes, by how far down the row the pointer is: in its top or bottom half, before
+   * or after it; for a folder (`into`), the middle half is into it, and its bottom only after it while it is closed.
+   */
+  private dropPlace(row: HTMLElement, event: DragEvent, into: boolean, open = false): DropPlace {
+    const rect = row.getBoundingClientRect();
+    const y = event.clientY - rect.top;
+    if (!(rect.height > 0) || !Number.isFinite(y)) return into ? "into" : "after";
+    if (!into) return y < rect.height / 2 ? "before" : "after";
+    return y < rect.height / 4 ? "before" : y > rect.height * 3 / 4 && !open ? "after" : "into";
+  }
+
+  /** The line where a dragged item goes, on `row` (none: taken away). */
+  private showDropLine(row?: HTMLElement, place?: DropPlace): void {
+    const container = this.containerEl.children[1] as HTMLElement | undefined;
+    for (const marked of Array.from(container?.querySelectorAll?.(".tm-nav-drop-before, .tm-nav-drop-after") ?? [])) {
+      if (marked !== row || place === "into") marked.classList.remove("tm-nav-drop-before", "tm-nav-drop-after");
+    }
+    if (!row || !place || place === "into") return;
+    row.classList.toggle("tm-nav-drop-before", place === "before");
+    row.classList.toggle("tm-nav-drop-after", place === "after");
+  }
+
+  /** A drag is over (a drag is no press either): its line goes, and a redraw that waited for it happens. */
+  private endDrag(): void {
+    this.dragging = undefined;
+    this.pressed = false;
+    this.showDropLine();
+    const container = this.containerEl.children[1] as HTMLElement | undefined;
+    for (const row of Array.from(container?.querySelectorAll?.(".is-being-dragged, .is-drop-target") ?? [])) row.classList.remove("is-being-dragged", "is-drop-target");
+    if (this.renderAfterPress) this.scheduleRender();
   }
 
   /**
@@ -394,7 +633,7 @@ export class TaskNavigationView extends ItemView {
   private watchFiles(): void {
     if (this.fileEvents) return;
     this.fileEvents = true;
-    const changed = (): void => { if (this.plugin.settings.showFiles) this.scheduleRender(); };
+    const changed = (): void => this.scheduleRender();
     this.registerEvent(this.app.vault.on("create", changed));
     this.registerEvent(this.app.vault.on("delete", changed));
     this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
@@ -412,42 +651,57 @@ export class TaskNavigationView extends ItemView {
     this.registerEvent(this.app.workspace.on("file-open", changed));
   }
 
-  /** Lists `folder`'s children, folders first and each by name, and the children of those left open, a step further in. */
-  private renderFolder(parent: HTMLElement, folder: TFolder, depth: number,
-    item: (parent: HTMLElement, key: string, label: string, active: boolean, open: (event: MouseEvent) => Promise<void>, icon?: string, color?: string) => HTMLElement): void {
-    const active = this.app.workspace.getActiveFile()?.path;
-    const children = sortFiles(folder.children, this.plugin.settings.fileSortOrder);
-    for (const child of children) {
-      const isFolder = child instanceof TFolder;
-      if (!isFolder && !(child instanceof TFile)) continue;
-      const open = isFolder && this.openFolders.has(child.path);
-      const toggle = (): void => {
-        if (open) this.openFolders.delete(child.path); else this.openFolders.add(child.path);
-        this.app.workspace.requestSaveLayout();
-      };
-      const row = isFolder
-        ? item(parent, `folder:${child.path}`, child.name, false, async () => { toggle(); this.render(); }, open ? "folder-open" : "folder", "muted")
-        : item(parent, `file:${child.path}`, child.basename, child.path === active, async event => {
-          await this.app.workspace.getLeaf(Keymap.isModEvent(event)).openFile(child);
-        }, FILE_ICONS[child.extension.toLowerCase()] ?? "file", "muted");
-      row.addClass(isFolder ? "tm-nav-folder" : "tm-nav-file");
-      row.style.setProperty("--tm-nav-depth", String(depth));
-      row.addEventListener("contextmenu", event => this.openFileMenu(event, child));
-      this.fileDrag(row, child);
-      if (child instanceof TFolder) this.fileDrop(row, child);
-      else if (child.extension === "md") this.dropTarget(row, { kind: "note", path: child.path });
-      if (isFolder) row.querySelector(".tm-nav-label")?.setAttribute("aria-expanded", String(open));
-      // Notes show their name alone; other files add their kind, as the file explorer does.
-      if (child instanceof TFile && child.extension !== "md") row.createDiv({ cls: "nav-file-tag tm-nav-file-tag", text: child.extension });
-      if (this.renaming?.path === child.path) this.renameField(row, child);
-      if (isFolder && child.children.length) this.chevron(row, open, child.name, `collapse:folder:${child.path}`, toggle);
-      if (open) this.renderFolder(parent, child, depth + 1, item);
+  /** `folder`'s children in the file tree's order: dragged into place, when they were, else by the chosen order. */
+  private folderChildren(folder: TFolder): TAbstractFile[] {
+    const custom = this.settings.customFileOrder ? this.settings.navOrder?.files[folder.path] ?? [] : [];
+    return sortFiles(folder.children, this.settings.fileSortOrder, custom);
+  }
+
+  /** Lists `folder`'s children in the file tree's order, and the children of those left open, a step further in. */
+  private renderFolder(parent: HTMLElement, folder: TFolder, depth: number, scope: FileScope): void {
+    for (const child of this.folderChildren(folder)) {
+      if (!(child instanceof TFolder) && !(child instanceof TFile)) continue;
+      this.fileRow(parent, child, depth, scope, `${child instanceof TFolder ? "folder" : "file"}:${child.path}`);
+      if (child instanceof TFolder && this.openFolders.has(child.path)) this.renderFolder(parent, child, depth + 1, scope);
     }
   }
 
-  /** The file explorer's menu for `file`: opening it, making notes and folders in a folder, renaming and deleting, and what
-   * Obsidian and other plugins add to a file's menu. */
-  private openFileMenu(event: MouseEvent, file: TAbstractFile): void {
+  /**
+   * A file's or folder's row, as the file explorer draws it: a folder opens in place from its name or chevron, a file
+   * opens (in a new tab with the modifier). In the file tree it drags as the file explorer's do, and files dropped on
+   * it go into the folder or beside it; in Favorites it drags among the favourites.
+   */
+  private fileRow(parent: HTMLElement, file: TFile | TFolder, depth: number, scope: FileScope, key: string): HTMLElement {
+    const isFolder = file instanceof TFolder;
+    const open = isFolder && this.openFolders.has(file.path);
+    const toggle = (): void => {
+      if (open) this.openFolders.delete(file.path); else this.openFolders.add(file.path);
+      this.app.workspace.requestSaveLayout();
+    };
+    const row = file instanceof TFolder
+      ? this.item(parent, key, file.name, false, () => { toggle(); this.render(); }, { icon: open ? "folder-open" : "folder", color: "muted", expanded: open })
+      : this.item(parent, key, file.basename, file.path === this.app.workspace.getActiveFile()?.path,
+        event => this.app.workspace.getLeaf(Keymap.isModEvent(event)).openFile(file), { icon: FILE_ICONS[file.extension.toLowerCase()] ?? "file", color: "muted" });
+    row.addClass(isFolder ? "tm-nav-folder" : "tm-nav-file");
+    row.style.setProperty("--tm-nav-depth", String(depth));
+    row.addEventListener("contextmenu", event => this.openFileMenu(event, file, scope));
+    // A favourite itself drags among the favourites (see sortable); what is in a favourite folder drags as in the file tree.
+    const favorite = key.startsWith("favorite:");
+    if (!favorite) {
+      this.fileDrag(row, file);
+      this.fileDrop(row, file);
+    }
+    if (file instanceof TFile && file.extension === "md") this.dropTarget(row, { kind: "note", path: file.path });
+    // Notes show their name alone; other files add their kind, as the file explorer does.
+    if (file instanceof TFile && file.extension !== "md") row.createDiv({ cls: "nav-file-tag tm-nav-file-tag", text: file.extension });
+    if (this.renaming?.path === file.path && this.renaming.scope === scope) this.renameField(row, file);
+    if (file instanceof TFolder && file.children.length) this.chevron(row, open, file.name, `collapse:${key}`, toggle);
+    return row;
+  }
+
+  /** The file explorer's menu for `file`: opening it, adding it to Favorites, making notes and folders in a folder,
+   * renaming and deleting, and what Obsidian and other plugins add to a file's menu. */
+  private openFileMenu(event: MouseEvent, file: TAbstractFile, scope: FileScope = "files"): void {
     event.preventDefault();
     const menu = new Menu();
     const run = (action: () => unknown): void => { void Promise.resolve().then(action).catch(error => new Notice(String(error))); };
@@ -459,8 +713,9 @@ export class TaskNavigationView extends ItemView {
       menu.addItem(entry => entry.setSection("action-primary").setTitle("New folder").setIcon("folder-plus").onClick(() => run(() => this.newFolder(file))));
     }
     if (!(file instanceof TFolder && file.isRoot())) {
+      this.favoriteMenuItem(menu, `${file instanceof TFolder ? "folder" : "file"}:${file.path}`);
       menu.addItem(entry => entry.setSection("action").setTitle("Rename…").setIcon("pencil").onClick(() => {
-        this.renaming = { path: file.path, value: file instanceof TFile ? file.basename : file.name, selected: false };
+        this.renaming = { path: file.path, value: file instanceof TFile ? file.basename : file.name, selected: false, scope };
         this.render();
       }));
       menu.addItem(entry => entry.setSection("danger").setTitle("Delete").setIcon("trash-2").setWarning(true)
@@ -474,7 +729,7 @@ export class TaskNavigationView extends ItemView {
   private async newNote(folder?: TFolder): Promise<void> {
     const parent = folder ?? this.app.fileManager.getNewFileParent(this.app.workspace.getActiveFile()?.path ?? "");
     const note = await this.app.vault.create(this.availablePath(parent, "Untitled", ".md"), "");
-    if (this.plugin.settings.showFiles) this.showFolder(parent);
+    if (this.settings.showFiles) this.showFolder(parent);
     await this.app.workspace.getLeaf(false).openFile(note, { active: true, state: { mode: "source" }, eState: { rename: "all" } });
   }
 
@@ -482,20 +737,24 @@ export class TaskNavigationView extends ItemView {
   private async newFolder(folder: TFolder): Promise<void> {
     const created = await this.app.vault.createFolder(this.availablePath(folder, "Untitled", ""));
     this.showFolder(folder);
-    this.renaming = { path: created.path, value: created.name, selected: false };
+    this.renaming = { path: created.path, value: created.name, selected: false, scope: "files" };
     this.render();
   }
 
-  /** The file tree's orders, as the file explorer offers them, the one in use checked. */
+  /** The file tree's orders, as the file explorer offers them, and the order its files were dragged into; the one in use checked. */
   private openSortMenu(button: HTMLElement): void {
     const menu = new Menu();
+    const choose = async (change: () => void): Promise<void> => {
+      change();
+      await this.plugin.saveSettings();
+      this.render();
+    };
     for (const [order, title, section] of FILE_SORT_ORDERS) {
-      menu.addItem(entry => entry.setSection(section).setTitle(title).setChecked(this.plugin.settings.fileSortOrder === order).onClick(async () => {
-        this.plugin.settings.fileSortOrder = order;
-        await this.plugin.saveSettings();
-        this.render();
-      }));
+      menu.addItem(entry => entry.setSection(section).setTitle(title).setChecked(!this.settings.customFileOrder && this.settings.fileSortOrder === order)
+        .onClick(() => choose(() => { this.settings.fileSortOrder = order; this.settings.customFileOrder = false; })));
     }
+    menu.addItem(entry => entry.setSection("custom").setTitle("Custom order").setChecked(this.settings.customFileOrder)
+      .onClick(() => choose(() => { this.settings.customFileOrder = true; })));
     const rect = button.getBoundingClientRect();
     menu.showAtPosition({ x: rect.left, y: rect.bottom });
   }
@@ -513,28 +772,72 @@ export class TaskNavigationView extends ItemView {
       : file instanceof TFolder ? manager.dragFolder(event, file, "tm-files") : null);
   }
 
-  /** Lets files and folders, from here or the file explorer, be dropped into `folder` to move them there. */
-  private fileDrop(row: HTMLElement, folder: TFolder): void {
-    this.dragManager?.handleDrop(row, (_event, draggable, hovering) => {
+  /**
+   * Lets files and folders, from here or the file explorer, be dropped on `target`'s row: into a folder (the middle of
+   * its row, or anywhere on the Files heading, the vault's top), or before or after a file or folder, which moves them
+   * into its folder at that place and keeps the folder in that order.
+   */
+  private fileDrop(row: HTMLElement, target: TAbstractFile): void {
+    this.dragManager?.handleDrop(row, (event, draggable, hovering) => {
       const files = (draggable?.type === "files" ? draggable.files ?? [] : draggable?.type === "file" || draggable?.type === "folder" ? [draggable.file] : [])
         .filter((file): file is TAbstractFile => file instanceof TFile || file instanceof TFolder);
-      const moving = files.filter(file => canMoveInto(file, folder));
-      if (!moving.length) return files.length ? { action: "", dropEffect: "none" } : undefined;
-      if (!hovering) void this.moveInto(moving, folder);
-      return { action: `Move into ${folder.isRoot() ? "the vault" : folder.name}`, dropEffect: "move", hoverEl: row, hoverClass: "is-drop-target" };
+      if (!files.length) return undefined;
+      const folder = target instanceof TFolder ? target : undefined;
+      const place = folder && (folder.isRoot() || !folder.parent) ? "into" : this.dropPlace(row, event, Boolean(folder), Boolean(folder && this.openFolders.has(folder.path)));
+      // Into the folder, or into the folder `target` is in, beside it.
+      const destination = place === "into" ? folder : target.parent;
+      const moving = !destination ? [] : place === "into" ? files.filter(file => canMoveInto(file, destination))
+        : files.filter(file => file !== target && (file.parent === destination || canMoveInto(file, destination)));
+      const shown = hovering && moving.length ? place : undefined;
+      this.showDropLine(row, shown);
+      // Obsidian lights the row up too; kept here as well, as the place changes while over the same row.
+      row.classList.toggle("is-drop-target", shown === "into");
+      if (!destination || !moving.length) return { action: "", dropEffect: "none" };
+      if (!hovering) void (place === "into" ? this.moveInto(moving, destination) : this.placeFiles(moving, target, place === "after"));
+      const into = `Move into ${destination.isRoot() ? "the vault" : destination.name}`;
+      return place === "into" ? { action: into, dropEffect: "move", hoverEl: row, hoverClass: "is-drop-target" }
+        : { action: moving.every(file => file.parent === destination) ? "Move here" : into, dropEffect: "move", hoverEl: row, hoverClass: `tm-nav-drop-${place}` };
+    });
+    row.addEventListener("dragleave", event => {
+      if (row.contains(event.relatedTarget as Node | null)) return;
+      this.showDropLine();
+      row.classList.remove("is-drop-target");
     });
   }
 
-  /** Moves files and folders into `folder`, keeping their names; a name already taken there stays put. */
-  private async moveInto(files: TAbstractFile[], folder: TFolder): Promise<void> {
+  /** Moves files and folders into `folder`, keeping their names; a name already taken there stays put. Returns those moved. */
+  private async moveInto(files: TAbstractFile[], folder: TFolder, render = true): Promise<TAbstractFile[]> {
+    const moved: TAbstractFile[] = [];
     for (const file of files) {
       const path = `${folder.isRoot() ? "" : `${folder.path}/`}${file.name}`;
       if (this.app.vault.getAbstractFileByPath(path)) { new Notice(`“${file.name}” already exists in ${folder.isRoot() ? "the vault" : folder.name}`); continue; }
-      try { await this.app.fileManager.renameFile(file, path); }
+      try { await this.app.fileManager.renameFile(file, path); moved.push(file); }
       catch (error) { new Notice(String(error)); }
     }
     this.showFolder(folder);
-    this.render();
+    if (render) this.render();
+    return moved;
+  }
+
+  /**
+   * Puts files just before or after `target`, moving those from elsewhere into its folder first; the folder keeps that
+   * order (and the tree follows the dragged order from then on).
+   */
+  private async placeFiles(files: TAbstractFile[], target: TAbstractFile, after: boolean): Promise<void> {
+    const folder = target.parent;
+    if (!folder) return;
+    const here = files.filter(file => file.parent === folder);
+    const moved = await this.moveInto(files.filter(file => file.parent !== folder), folder, false);
+    const placed = [...here, ...moved].map(file => file.name);
+    if (!placed.length) { this.render(); return; }
+    const names = this.folderChildren(folder).map(file => file.name).filter(name => !placed.includes(name));
+    const at = names.indexOf(target.name);
+    names.splice(at < 0 ? names.length : at + (after ? 1 : 0), 0, ...placed);
+    const order = this.settings.navOrder ?? { projects: [], tags: [], files: {} };
+    await this.saveOrder(() => {
+      this.settings.navOrder = { ...order, files: { ...order.files, [folder.path]: names } };
+      this.settings.customFileOrder = true;
+    });
   }
 
   /** Opens `folder` and the folders around it, so what was just made in it shows. */

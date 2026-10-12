@@ -1,8 +1,12 @@
 import type { Project } from "./types";
+import { inOrder } from "./sidebar-order";
 
-/** Stable parent-first ordering; missing parents and cycles remain visible as roots. */
-export function projectHierarchy(projects: Project[]): { project: Project; depth: number }[] {
-  const ordered = [...projects].sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
+/**
+ * Stable parent-first ordering, each parent's subprojects by name, or as `order` (paths) lists them; missing parents
+ * and cycles remain visible as roots.
+ */
+export function projectHierarchy(projects: Project[], order: string[] = []): { project: Project; depth: number }[] {
+  const ordered = inOrder([...projects].sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path)), order, project => project.path);
   const visible = new Set(ordered.map(project => project.path));
   const parents = new Map(ordered.map(project => [project.path, project.parentPath && visible.has(project.parentPath) ? project.parentPath : undefined]));
   const checked = new Set<string>();

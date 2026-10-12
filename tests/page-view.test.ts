@@ -707,7 +707,8 @@ it("edits the task on the current editor line only when task mode is off", () =>
    [{ mode: "projects", layout: "calendar" }, false],
    [{ mode: "projects", layout: "calendar", projectLayout: "gantt" }, false],
    [{ mode: "projects", pagePath: "Project.md", layout: "calendar" }, true],
-   [{ mode: "tags", layout: "calendar" }, false],
+   // A tab left on the old Tags list shows All Tasks.
+   [{ mode: "tags", layout: "calendar" }, true],
    [{ mode: "tags", tag: "work", layout: "calendar" }, true],
    [{ mode: "smartLists", layout: "calendar" }, false],
    [{ mode: "smartLists", smartListId: "missing", layout: "calendar" }, false]

@@ -26,7 +26,11 @@ vi.mock("obsidian", async importOriginal => {
   return { ...original, Menu, Notice: class {}, setIcon: vi.fn() };
 });
 
+// Asking before deleting opens an Obsidian modal; the tests check what it asks.
+vi.mock("../src/confirm-modal", () => ({ openConfirm: vi.fn() }));
+
 import { Platform, TFile, type App, type WorkspaceLeaf } from "obsidian";
+import { openConfirm } from "../src/confirm-modal";
 import { TaskIndex } from "../src/task-index";
 import { activeTaskDrag } from "../src/sidebar-drop";
 import { TaskMainView } from "../src/task-view";
@@ -70,7 +74,8 @@ async function setup(notes: Array<[string, string]>, frontmatter: Record<string,
     openEditor: vi.fn(), openTaskView: vi.fn(), undoTaskChange: vi.fn(), redoTaskChange: vi.fn(), openQuickSwitcher: vi.fn(), saveSettings: vi.fn(),
     showInTaskSidebar: vi.fn().mockResolvedValue(undefined),
     projectDraft: vi.fn(() => ({ name: "Site", date: "", endDate: "", deadline: "", priority: "", parent: "", tags: "work", color: "" })),
-    updateProject: vi.fn().mockResolvedValue("Site.md"), deleteProject: vi.fn().mockResolvedValue(undefined)
+    updateProject: vi.fn().mockResolvedValue("Site.md"), deleteProject: vi.fn().mockResolvedValue(undefined),
+    isFavorite: vi.fn(() => false), toggleFavorite: vi.fn().mockResolvedValue(undefined), app
   };
   const view = new TaskMainView({ app } as unknown as WorkspaceLeaf, plugin as unknown as TaskManagerPlugin);
   const internals = view as unknown as { refresh(): void; content: HTMLElement };
@@ -680,26 +685,6 @@ describe("folding", () => {
   });
 });
 
-it("lays tag rows out on one line in the Things style", async () => {
-  const { view, content, plugin } = await setup([["A.md", "- [ ] One #[[Errand]]\n- [ ] Two #[[Errand]]\n- [x] Three #[[Errand]]\n- [x] Four #[[Office]]"]]);
-  plugin.settings.style = "things";
-  await view.setState({ mode: "tags" });
-  const rows = Array.from(content().querySelectorAll<HTMLElement>(".tm-things-tag-row"));
-  expect(rows.map(row => Array.from(row.querySelector(".tm-task-primary")!.children).map(child => [child.className, child.textContent]))).toEqual([
-    [["tm-task-title", "Errand"], ["tm-things-count", "2"], ["tm-things-trailing tm-things-tag-done", "1 completed"]],
-    [["tm-task-title", "Office"], ["tm-things-trailing tm-things-tag-done", "1 completed"]]
-  ]);
-  expect(content().querySelector(".tm-things-tag-row .tm-task-metadata")).toBeNull();
-});
-
-it("shows the tag list's empty message outside the list", async () => {
-  const { view, content } = await setup([note("A.md", 1)]);
-  await view.setState({ mode: "tags" });
-  const empty = content().querySelector<HTMLElement>(".tm-empty")!;
-  expect(empty.hidden).toBe(false);
-  expect(empty.closest("[role=list]")).toBeNull();
-});
-
 describe("project actions", () => {
   const blank = { name: "Site", date: "", endDate: "", deadline: "", priority: "", parent: "", tags: "work", color: "" };
   const menuButton = (label: string) => Array.from(document.querySelectorAll<HTMLElement>(".tm-task-menu button"))
@@ -715,7 +700,7 @@ describe("project actions", () => {
     more.click();
     expect(more.getAttribute("aria-expanded")).toBe("true");
     const labels = Array.from(document.querySelectorAll(".tm-task-menu button")).map(button => button.getAttribute("aria-label") ?? button.querySelector(".tm-task-menu-label")?.textContent);
-    expect(labels).toEqual(["P1", "P2", "P3", "Status", "Start date", "End date", "Deadline", "Parent project", "Tags", "Color", "Rename", "Add description", "Open note", "Delete project"]);
+    expect(labels).toEqual(["P1", "P2", "P3", "Status", "Start date", "End date", "Deadline", "Parent project", "Tags", "Color", "Rename", "Add description", "Add to favorites", "Open note", "Delete project"]);
     menuButton("P1").click();
     expect(plugin.updateProject.mock.lastCall![0]).toBe("Site.md");
     expect(lastChange(plugin).priority).toBe("1");
@@ -760,14 +745,18 @@ describe("project actions", () => {
   });
 
   it("asks before deleting a project, from the menu or a right-click on its row", async () => {
-    const { view, content } = await setup([note("Site.md", 1)], { "Site.md": { tags: ["project"] } });
-    const confirm = vi.spyOn(view as unknown as { confirmDeleteProject(project: unknown): void }, "confirmDeleteProject").mockImplementation(() => {});
+    const { view, content, plugin } = await setup([note("Site.md", 1)], { "Site.md": { tags: ["project"] } });
+    const confirm = vi.mocked(openConfirm);
+    confirm.mockClear();
     await view.setState({ mode: "projects" });
     const row = content().querySelector<HTMLElement>(".tm-project-row")!;
     row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 30, clientY: 40 }));
     menuButton("Delete project").click();
     expect(confirm).toHaveBeenCalledOnce();
-    expect((confirm.mock.calls[0][0] as { path: string }).path).toBe("Site.md");
+    const options = confirm.mock.calls[0][1];
+    expect(options.title).toBe("Delete “Site”?");
+    options.run();
+    expect(plugin.deleteProject).toHaveBeenCalledWith("Site.md");
   });
 });
 
@@ -917,17 +906,15 @@ describe("dragging in the Projects list", () => {
   });
 });
 
-describe("the Tags list", () => {
-  it("lists the tags, with no search box, and says there are none only when there are none", async () => {
-    const { view, content } = await setup([["A.md", "- [ ] Call #[[work]]\n- [ ] Plan #[[home]]"]]);
-    await view.setState({ mode: "tags" });
-    expect(Array.from(content().querySelectorAll(".tm-project-row .tm-task-title")).map(title => title.textContent).sort()).toEqual(["home", "work"]);
-    expect(content().querySelector("input[type=search]")).toBeNull();
-    expect(content().querySelector(".tm-empty")).toBeNull();
-    const empty = await setup([["A.md", "- [ ] Call"]]);
-    await empty.view.setState({ mode: "tags" });
-    expect(empty.content().querySelector(".tm-empty")?.textContent).toBe("No tags yet. Add a tag to a task to see it here.");
-  });
+it("shows All Tasks in a tab left on the Tags list, which the task sidebar now lists instead", async () => {
+  const { view, content } = await setup([["A.md", "- [ ] Call #[[work]]"]]);
+  await view.setState({ mode: "tags" });
+  expect(view.getState().mode).toBe("all");
+  expect(content().querySelector(".tm-page-title, h1")?.textContent).toBe("All Tasks");
+  expect(Array.from(content().querySelectorAll(".tm-task-title")).map(title => title.textContent)).toContain("Call");
+  // A tag's own list stays.
+  await view.setState({ mode: "tags", tag: "work" });
+  expect(view.getState()).toMatchObject({ mode: "tags", tag: "work" });
 });
 
 describe("View options › Projects in the calendar", () => {
@@ -1268,7 +1255,7 @@ describe("tab title", () => {
     expect(updateHeader).toHaveBeenCalled();
     expect(updateTitle).toHaveBeenCalled();
     // Every list names its tab as its page does.
-    for (const [state, title] of [[{ mode: "projects" }, "Projects"], [{ mode: "tags" }, "Tags"], [{ mode: "tags", tag: "home" }, "home"], [{ mode: "all" }, "All Tasks"],
+    for (const [state, title] of [[{ mode: "projects" }, "Projects"], [{ mode: "tags" }, "All Tasks"], [{ mode: "tags", tag: "home" }, "home"], [{ mode: "all" }, "All Tasks"],
       [{ mode: "inbox" }, "Inbox"], [{ mode: "today" }, "Today"], [{ mode: "upcoming" }, "Upcoming"]] as const) {
       await view.setState(state);
       expect(internals.titleEl.textContent).toBe(title);

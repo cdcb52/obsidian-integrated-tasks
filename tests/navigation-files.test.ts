@@ -2,22 +2,24 @@
 import { beforeAll, expect, it, vi } from "vitest";
 import { installObsidianDom } from "./helpers/obsidian-dom";
 
-const menus: Array<{ titles: string[]; click(title: string): void }> = [];
+const menus: Array<{ titles: string[]; checked: string[]; click(title: string): void }> = [];
 vi.mock("obsidian", async importOriginal => {
   class Menu {
     items: Array<{ title: string; click?: () => void }> = [];
-    constructor() { menus.push({ titles: [], click: title => this.items.find(item => item.title === title)?.click?.() }); }
+    constructor() { menus.push({ titles: [], checked: [], click: title => this.items.find(item => item.title === title)?.click?.() }); }
     addItem(build: (item: Record<string, (value: unknown) => unknown>) => void): this {
       const entry: { title: string; click?: () => void } = { title: "" };
       const item: Record<string, (value: unknown) => unknown> = {};
       for (const name of ["setSection", "setIcon", "setWarning"]) item[name] = () => item;
       item.setTitle = title => { entry.title = String(title); menus[menus.length - 1].titles.push(entry.title); return item; };
       item.onClick = click => { entry.click = click as () => void; return item; };
+      item.setChecked = checked => { if (checked) menus[menus.length - 1].checked.push(entry.title); return item; };
       build(item);
       this.items.push(entry);
       return this;
     }
     showAtMouseEvent(): void {}
+    showAtPosition(): void {}
   }
   return { ...await importOriginal<typeof import("./obsidian-mock")>(), Menu, Keymap: { isModEvent: (event: MouseEvent) => event.metaKey }, Notice: class {}, setIcon: vi.fn() };
 });
@@ -70,12 +72,16 @@ function setup() {
     }
   };
   const settings = { ...DEFAULT_SETTINGS, showFiles: false };
-  const plugin = { settings, index: { projects: () => [], tagSummaries: () => [], query: () => [] } } as unknown as TaskManagerPlugin;
+  const saveSettings = vi.fn(async () => {});
+  const plugin = {
+    settings, saveSettings, index: { projects: () => [], tagSummaries: () => [], query: () => [] },
+    isFavorite: (key: string) => settings.favorites.includes(key), toggleFavorite: vi.fn(async (key: string) => { settings.favorites = [...settings.favorites, key]; })
+  } as unknown as TaskManagerPlugin;
   const view = new TaskNavigationView({ app } as unknown as WorkspaceLeaf, plugin);
   const container = view.containerEl.children[1] as HTMLElement;
   const labels = () => Array.from(container.querySelectorAll(".tm-nav-files .tm-nav-children .tm-nav-label, .tm-nav-files input")).map(label => label.textContent || (label as HTMLInputElement).value);
   const row = (key: string) => container.querySelector(`[data-tm-nav-key="${key}"]`)!.closest(".tm-nav-item") as HTMLElement;
-  return { view, settings, container, labels, row, app, getLeaf, openFile, renameFile, create, root, work };
+  return { view, settings, container, labels, row, app, getLeaf, openFile, renameFile, create, root, work, plugin, saveSettings };
 }
 
 it("indents smart lists a step under All Tasks, as subprojects are under their parent", () => {
@@ -129,7 +135,7 @@ it("renames in place from the menu, and makes new notes in a folder", async () =
   view.refresh();
   row("file:Notes 2.md").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
   const menu = menus[menus.length - 1];
-  expect(menu.titles).toEqual(["Open in new tab", "Open to the right", "Rename…", "Delete"]);
+  expect(menu.titles).toEqual(["Open in new tab", "Open to the right", "Add to favorites", "Rename…", "Delete"]);
   menu.click("Rename…");
   const input = container.querySelector("input.tm-nav-rename") as HTMLInputElement;
   expect(input.value).toBe("Notes 2");
@@ -181,8 +187,8 @@ it("drags files as the file explorer does, and moves files and folders dropped o
   const heading = row("files");
   expect(drags.get(notes)!({} as DragEvent)).toEqual({ type: "file", file: root.children[2] });
   expect(drags.get(folder)!({} as DragEvent)).toEqual({ type: "folder", file: work });
-  // Folders and the Files heading (the vault's top) take files; a note takes tasks instead.
-  expect(drops.has(folder) && drops.has(heading) && !drops.has(notes)).toBe(true);
+  // Folders and the Files heading (the vault's top) take files, and so does a note, beside it; a note takes tasks too.
+  expect(drops.has(folder) && drops.has(heading) && drops.has(notes)).toBe(true);
   expect(dropTargetOf(notes)?.drop).toEqual({ kind: "note", path: "Notes 2.md" });
   expect(dropTargetOf(folder)).toBeUndefined();
   const note = root.children[2];
@@ -196,4 +202,59 @@ it("drags files as the file explorer does, and moves files and folders dropped o
   expect(drops.get(folder)!({} as DragEvent, { type: "folder", file: work }, true)).toMatchObject({ dropEffect: "none" });
   // Something that is not a file, such as a task, is left to other targets.
   expect(drops.get(folder)!({} as DragEvent, null, true)).toBeUndefined();
+});
+
+it("puts files dragged beside a file or folder at that place, and keeps that order as the tree's custom order", async () => {
+  const { view, settings, row, labels, app, renameFile, root, work, saveSettings } = setup();
+  settings.showFiles = true;
+  view.refresh();
+  const { drops } = app.dragManager;
+  const [notes10, notes2] = [root.children[1], root.children[2]] as TFile[];
+  /** Drops `file` on `key`'s row: at its top (`y` 2), its middle (10) or its bottom (18), of 20. */
+  const drop = (key: string, file: TFile | TFolder, y: number, hovering = false) => {
+    const target = row(key);
+    target.getBoundingClientRect = () => ({ top: 0, height: 20 }) as DOMRect;
+    return drops.get(target)!({ clientY: y } as DragEvent, { type: file instanceof TFolder ? "folder" : "file", file }, hovering);
+  };
+  expect(labels()).toEqual(["Work", "Notes 2", "Notes 10"]);
+  // Hovering shows a line where it goes.
+  expect(drop("file:Notes 2.md", notes10, 2, true)).toMatchObject({ action: "Move here", dropEffect: "move", hoverClass: "tm-nav-drop-before" });
+  expect(row("file:Notes 2.md").classList.contains("tm-nav-drop-before")).toBe(true);
+  drop("file:Notes 2.md", notes10, 2);
+  await vi.waitFor(() => expect(labels()).toEqual(["Work", "Notes 10", "Notes 2"]));
+  expect(settings.customFileOrder).toBe(true);
+  expect(settings.navOrder.files["/"]).toEqual(["Work", "Notes 10.md", "Notes 2.md"]);
+  expect(saveSettings).toHaveBeenCalled();
+  expect(row("file:Notes 2.md").classList.contains("tm-nav-drop-before")).toBe(false);
+  // Files and folders mix: a note goes above a folder from the top of its row, and into it from the middle.
+  drop("folder:Work", notes2, 2);
+  await vi.waitFor(() => expect(labels()).toEqual(["Notes 2", "Work", "Notes 10"]));
+  expect(drop("folder:Work", notes2, 10, true)).toMatchObject({ action: "Move into Work", hoverClass: "is-drop-target" });
+  expect(renameFile).not.toHaveBeenCalled();
+  // From another folder, it moves here first.
+  const plan = work.children[0] as TFile;
+  expect(drop("file:Notes 10.md", plan, 18, true)).toMatchObject({ action: "Move into the vault", hoverClass: "tm-nav-drop-after" });
+  drop("file:Notes 10.md", plan, 18);
+  await vi.waitFor(() => expect(renameFile).toHaveBeenCalledWith(plan, "Plan.md"));
+  await vi.waitFor(() => expect(settings.navOrder.files["/"]).toEqual(["Notes 2.md", "Work", "Notes 10.md", "Plan.md"]));
+  // Nothing goes beside itself.
+  expect(drop("file:Notes 10.md", notes10, 2, true)).toMatchObject({ dropEffect: "none" });
+  // The sort menu says the order is custom; another order sorts again, keeping the custom one for later.
+  (view.containerEl.querySelector('[aria-label="Change sort order"]') as HTMLElement).click();
+  await vi.waitFor(() => expect(menus[menus.length - 1].titles).toContain("Custom order"));
+  expect(menus[menus.length - 1].checked).toEqual(["Custom order"]);
+  menus[menus.length - 1].click("File name (A to Z)");
+  await vi.waitFor(() => expect(labels()).toEqual(["Work", "Notes 2", "Notes 10"]));
+  expect(settings.customFileOrder).toBe(false);
+  expect(settings.navOrder.files["/"]).toHaveLength(4);
+  (view.containerEl.querySelector('[aria-label="Change sort order"]') as HTMLElement).click();
+  await vi.waitFor(() => expect(menus[menus.length - 1].checked).toEqual(["File name (A to Z)"]));
+  menus[menus.length - 1].click("Custom order");
+  await vi.waitFor(() => expect(labels()).toEqual(["Notes 2", "Work", "Notes 10"]));
+});
+
+it("sorts a folder's files in its custom order, with files not yet placed after them in the chosen order", () => {
+  const { root } = setup();
+  expect(sortFiles(root.children, "alphabetical", ["Notes 10.md"]).map(file => file.name)).toEqual(["Notes 10.md", "Work", "Notes 2.md"]);
+  expect(sortFiles(root.children, "alphabeticalReverse", ["Gone.md", "Notes 2.md"]).map(file => file.name)).toEqual(["Notes 2.md", "Work", "Notes 10.md"]);
 });
