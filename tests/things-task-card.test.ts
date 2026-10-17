@@ -71,6 +71,13 @@ describe("card notes", () => {
     expect(cardNotes("- First\n- Second\n  - Nested\n- [ ] A checkbox line")).toBe("First\nSecond\n  - Nested\n- [ ] A checkbox line");
     expect(descriptionLines(cardNotes("- First\n- Second"), 0)).toEqual(descriptionLines("- First\n- Second", 0));
   });
+
+  it("shows notes written as text, quotes or code as the note has them, and saves them in that shape", () => {
+    const notes = "Plain text\n> A quote\n- Bullet\n```\n- [ ] Code\n```";
+    expect(cardNotes(notes)).toBe(notes);
+    expect(descriptionLines(`${notes}\nTyped`, 0, false)).toEqual(["    Plain text", "    > A quote", "    - Bullet", "    ```", "    - [ ] Code", "    ```", "    Typed"]);
+    expect(descriptionLines("Typed\n- [ ] Checklist", 0, false)).toEqual(["    Typed", "    - - [ ] Checklist"]);
+  });
 });
 
 describe("the card's project button", () => {

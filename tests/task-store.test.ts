@@ -122,6 +122,14 @@ it("preserves description bullets when editing, completing, and moving a task", 
   expect(tasks()[1].description).toBe("- Child detail");
 });
 
+it("saves edited notes in the shape the note writes them: text stays text, bullets stay bullets", async () => {
+  const { store, read } = setup("# Plan\n- [ ] Text\n    A paragraph\n- [ ] Bullets\n    - A bullet\n");
+  const tasks = () => scanTasks("Project.md", read());
+  await store.update(tasks()[0], { ...draft, title: "Text", description: "A paragraph\nAnother line" });
+  await store.update(tasks()[1], { ...draft, title: "Bullets", description: "A bullet\nAnother bullet" });
+  expect(read()).toBe("# Plan\n- [ ] Text\n    A paragraph\n    Another line\n- [ ] Bullets\n    - A bullet\n    - Another bullet\n");
+});
+
 it.each(["top", "bottom"] as const)("creates a multiline batch together at the %s of an indented checklist", async position => {
   const { store, read } = setup("# Plan\n  - [ ] Existing\n", position);
   await store.create({ ...draft, additionalLines: ["  - Detail", "  - [ ] Child [[2026-09-08]]", "- [ ] Sibling"] });

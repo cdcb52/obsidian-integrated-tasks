@@ -7,6 +7,7 @@ import { checkboxLabel, statusClass } from "./task-status";
 import { renderThingsTaskDetails, thingsDeadlineLabel, type ThingsDetailsOptions } from "./things-row-details";
 import { openTagsPopover } from "./task-menu";
 import { taskInputRanges, tokenHighlightClass, type InputTokenRange } from "./task-input";
+import { bulletNotes } from "./task-description";
 import { draftFromTask, draftFromTitle } from "./task-draft";
 import type { Task, TaskGrouping } from "./types";
 
@@ -61,10 +62,12 @@ export interface TaskCardOptions {
 }
 
 /**
- * Notes as Things shows them: top-level bullets read as plain lines. Saving turns each plain line
- * back into a bullet (see `descriptionLines`), so the note file keeps its shape.
+ * Notes as Things shows them: when they are bullets alone, each top-level bullet reads as a plain line, and saving turns
+ * each plain line back into a bullet (see `descriptionLines`), so the note file keeps its shape. Notes written otherwise
+ * (text, quotes, code…) show as the note has them, and save as typed.
  */
 export function cardNotes(description: string | undefined): string {
+    if (!bulletNotes(description)) return description ?? "";
     return (description ?? "").split("\n").map(line => line.replace(/^[-*+] (?!\[[ xX/?-]\])/, "")).join("\n");
 }
 

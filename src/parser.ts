@@ -1,6 +1,6 @@
 import { formatTags, normalizeTags, tagFormat, trailingTag } from "./task-tags";
 import { indentStep, indentText, indentWidth } from "./task-indentation";
-import { bodyLines, scanSections, splitDestination, destinationString } from "./structure";
+import { noteLines, scanSections, splitDestination, destinationString } from "./structure";
 import { findInputDate, findInputDeadline, findInputTime, formatDate, formatLocalDate, parseDateTimeExpression, parseTimeExpression, removeSpans } from "./date";
 import { STATUS_CHARS, draftStatus, isClosedStatus, statusFromChar } from "./task-status";
 import type { ParsedTaskMetadata, Priority, Task, TaskDraft, TaskStatus } from "./types";
@@ -505,36 +505,31 @@ export function scanTasks(path: string, content: string, reference = new Date(),
   const tasks: Task[] = [];
   const stack: Task[] = [];
   const sourceLines = content.split(/\r?\n/);
-  const descriptions = new Map<Task, { lines: string[]; lineNumbers: number[]; bulletIndent: number }>();
+  const descriptions = new Map<Task, { lines: string[]; lineNumbers: number[] }>();
   const headings = new Map(scanSections(content, sectionHeadingLevel).map((heading) => [heading.line, heading]));
   let section: ReturnType<typeof scanSections>[number] | undefined;
 
-  for (const { text: line, line: lineNumber } of bodyLines(content)) {
+  for (const { text: line, line: lineNumber, body } of noteLines(content)) {
     const heading = headings.get(lineNumber);
     if (heading) { section = heading; stack.length = 0; }
-    const parsed = cachedParseTaskLine(line, reference, dateFormat);
+    const parsed = body ? cachedParseTaskLine(line, reference, dateFormat) : undefined;
     if (!parsed) {
       if (!line.trim()) continue;
       const indent = indentWidth(/^[ \t]*/.exec(line)?.[0] ?? "");
       while (stack.length && stack[stack.length - 1].indent >= indent) stack.pop();
       const owner = stack[stack.length - 1];
       if (!owner) continue;
-      const marker = /^[ \t]*[-+*][ \t]+(.*)$/.exec(line);
-      if (marker && /^\[[^\]]\](?:\s|$)/.test(marker[1])) continue;
-      const bullet = Boolean(marker);
-      const description = descriptions.get(owner);
-      if (bullet || (description && indent > description.bulletIndent)) {
-        const entry = description ?? { lines: [], lineNumbers: [], bulletIndent: indent };
-        const previous = entry.lineNumbers[entry.lineNumbers.length - 1];
-        if (previous !== undefined && sourceLines.slice(previous + 1, lineNumber).every(text => !text.trim())) {
-          for (let blank = previous + 1; blank < lineNumber; blank++) { entry.lines.push(""); entry.lineNumbers.push(blank); }
-        }
-        entry.lineNumbers.push(lineNumber);
-        // Spaces, whatever the note uses: the margin common to the lines comes off below, and saving indents them again.
-        entry.lines.push(" ".repeat(indent) + line.trimStart());
-        if (bullet) entry.bulletIndent = indent;
-        descriptions.set(owner, entry);
+      // Everything indented beneath a task is its notes (bullets, text, quotes, code…), except a checklist item.
+      if (body && /^[ \t]*[-+*][ \t]+\[[^\]]\](?:\s|$)/.test(line)) continue;
+      const entry = descriptions.get(owner) ?? { lines: [], lineNumbers: [] };
+      const previous = entry.lineNumbers[entry.lineNumbers.length - 1];
+      if (previous !== undefined && sourceLines.slice(previous + 1, lineNumber).every(text => !text.trim())) {
+        for (let blank = previous + 1; blank < lineNumber; blank++) { entry.lines.push(""); entry.lineNumbers.push(blank); }
       }
+      entry.lineNumbers.push(lineNumber);
+      // Spaces, whatever the note uses: the margin common to the lines comes off below, and saving indents them again.
+      entry.lines.push(" ".repeat(indent) + line.trimStart());
+      descriptions.set(owner, entry);
       continue;
     }
 

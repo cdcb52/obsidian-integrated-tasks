@@ -22,7 +22,7 @@ export interface ParsedTaskMetadata {
 }
 
 export interface Task extends ParsedTaskMetadata {
-  /** Markdown bullets nested beneath this task, excluding child checklists. */
+  /** Everything indented beneath this task (bullets, text, quotes, code…), excluding child checklists and their own. */
   description?: string;
   descriptionLines?: number[];
   id: string;

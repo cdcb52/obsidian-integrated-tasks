@@ -412,6 +412,16 @@ describe("task descriptions", () => {
     expect(tasks[1].description).toBeUndefined();
   });
 
+  it("reads everything indented beneath a task as its notes, not only bullets, and keeps checklists as subtasks", () => {
+    const content = "- [ ] Task\n    Plain text\n    > A quote\n    1. Numbered\n    - Bullet\n\n    ```js\n    - [ ] Not a task\n    ```\n    - [ ] Subtask\n        Subtask text\n    Back to the task\n- [ ] Next\nNot indented";
+    const tasks = scanTasks("Note.md", content);
+    expect(tasks.map(task => task.title)).toEqual(["Task", "Subtask", "Next"]);
+    expect(tasks[0].description).toBe("Plain text\n> A quote\n1. Numbered\n- Bullet\n\n```js\n- [ ] Not a task\n```\nBack to the task");
+    expect(tasks[0].descriptionLines).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 11]);
+    expect(tasks[1].description).toBe("Subtask text");
+    expect(tasks[2].description).toBeUndefined();
+  });
+
   it("reads in-progress, waiting and cancelled checklist items as subtasks, not description", () => {
     const tasks = scanTasks("Note.md", "- [ ] Task\n  - Detail\n  - [/] Draft\n  - [?] Hear back\n  - [-] Dropped\n  - [!] Flagged");
     expect(tasks.map(task => [task.title, task.status, task.parentId])).toEqual([

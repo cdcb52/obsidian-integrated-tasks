@@ -18,6 +18,13 @@ export function bodyLines(content: string | readonly string[], codeBlocks = code
   return result;
 }
 
+/** Every line, with whether it is body text as `bodyLines` reads it: a fenced line holds no task, but can be a task's notes. */
+export function noteLines(content: string | readonly string[], codeBlocks = codeBlocksHoldTasks): Array<{ text: string; line: number; body: boolean }> {
+  const result: Array<{ text: string; line: number; body: boolean }> = [];
+  classifyLines(typeof content === "string" ? content.split(/\r?\n/) : content, (text, line, body) => { result.push({ text, line, body }); }, codeBlocks);
+  return result;
+}
+
 /** Zero-based numbers of YAML and fenced lines, which hold no tasks (only the fences, when code blocks hold tasks). */
 export function nonBodyLines(lines: Iterable<string>): Set<number> {
   const result = new Set<number>();

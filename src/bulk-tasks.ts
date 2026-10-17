@@ -69,7 +69,7 @@ export function planBulkTasks(contents: Map<string, string>, changes: BulkTaskCh
     }
     if (entry.draft?.description !== undefined && entry.draft.description !== (entry.task.description ?? "")) {
       if ((entry.block.description ?? "") !== (entry.task.description ?? "")) throw new Error("Task description changed. Refresh and try again.");
-      replaceDescription(lines.get(entry.task.path)!, entry.block.start, entry.block.descriptionLines ?? [], entry.draft.description, entry.block.indent);
+      replaceDescription(lines.get(entry.task.path)!, entry.block.start, entry.block.descriptionLines ?? [], entry.draft.description, entry.block.indent, entry.block.description);
     }
   }
   // A subtask lines up with the anchor's other subtasks, however the note indents them.
