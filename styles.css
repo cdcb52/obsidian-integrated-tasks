@@ -2691,7 +2691,7 @@ button.tm-sidebar-open-note:hover, button.tm-sidebar-open-note:focus-visible { b
 }
 /* The Things style: the details read like an open Things card. Each property is a line of its icon and its value, in the
    card's weight (an unset one shows its name, faint); Today has its yellow star, a date its red calendar, a deadline its
-   flag; tags are pills; and the subtasks are the card's checklist, round boxes under the title, between hairlines. */
+   flag; tags are pills; and the subtasks are the card's checklist, round boxes between hairlines. */
 .tm-task-sidebar.tm-style-things .tm-sidebar-property { grid-template-columns: 14px minmax(0, 1fr); gap: 7px; }
 .tm-task-sidebar.tm-style-things .tm-sidebar-property-name > :not(.tm-sidebar-property-icon) { display: none; }
 .tm-task-sidebar.tm-style-things .tm-sidebar-property-icon { color: var(--text-normal); }
@@ -2705,8 +2705,9 @@ button.tm-sidebar-open-note:hover, button.tm-sidebar-open-note:focus-visible { b
 /* Priority colours its icon only, as on a card. */
 .tm-task-sidebar.tm-style-things .tm-sidebar-property:is(.is-p1, .is-p2, .is-p3) .tm-sidebar-property-value { color: var(--text-normal); }
 .tm-task-sidebar.tm-style-things .tm-sidebar-property-value .tm-things-card-tag { font-weight: var(--font-semibold); }
-.tm-task-sidebar.tm-style-things .tm-sidebar-subtasks { margin-left: 30px; border-top: 1px solid var(--background-modifier-border); }
-.tm-task-sidebar.tm-style-things .tm-sidebar-subtask { grid-template-columns: 12px minmax(0, 1fr); padding: 5px 2px; border-bottom: 1px solid var(--background-modifier-border); border-radius: 0; }
+/* Not indented: each box centres under the property icons, its title in line with their values. */
+.tm-task-sidebar.tm-style-things .tm-sidebar-subtasks { border-top: 1px solid var(--background-modifier-border); }
+.tm-task-sidebar.tm-style-things .tm-sidebar-subtask { grid-template-columns: 12px minmax(0, 1fr); padding: 5px 2px 5px 7px; border-bottom: 1px solid var(--background-modifier-border); border-radius: 0; }
 .tm-task-sidebar.tm-style-things .tm-sidebar-subtask:hover { background: none; }
 .tm-task-sidebar.tm-style-things .tm-sidebar-subtask-add { --checkbox-size: 12px; --checkbox-radius: 50%; border: 1.5px dashed var(--interactive-accent); opacity: 0.6; }
 .tm-sidebar-subtask.is-new input::placeholder { color: var(--text-faint); }
