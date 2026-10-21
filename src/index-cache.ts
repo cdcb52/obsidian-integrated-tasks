@@ -5,7 +5,7 @@ import type { NoteHeading } from "./structure";
 import type { Task } from "./types";
 
 /** Bump whenever the Task shape or note parsing changes, so older records are parsed again. */
-export const CACHE_SCHEMA = 5;
+export const CACHE_SCHEMA = 6;
 
 /** A task without its path-derived fields; parent and children are stored as line numbers. */
 export type CachedTask = Omit<Task, "id" | "path" | "parentId" | "childIds"> & { parentId?: number; childIds?: number[] };
@@ -53,18 +53,16 @@ export interface NoteScan {
   day: string;
 }
 
-/** Whether any task's dates depend on the day they were parsed: a deadline or defer date that is not an exact date. */
+/** Whether any task's dates depend on the day they were parsed: a deadline that is not an exact date. */
 function usesRelativeDates(tasks: readonly Task[], dateFormat: string): boolean {
   const yearlessFormat = dateFormat !== "" && !/[YyGg]/.test(dateFormat);
   const now = new Date();
   for (const task of tasks) {
-    if (yearlessFormat && (task.scheduledDate || task.deadline || task.deferDate || task.completedDate)) return true;
-    if (!task.deadline && !task.deferDate) continue;
+    if (yearlessFormat && (task.scheduledDate || task.deadline || task.completedDate)) return true;
+    if (!task.deadline) continue;
     for (const range of taskLineRanges(task.raw, now, dateFormat)) {
-      if (range.kind !== "deadline" && range.kind !== "defer") continue;
-      const token = task.raw.slice(range.from, range.to);
-      const value = range.kind === "deadline" ? token.slice(1, -1) : token.slice(1);
-      if (!/^someday$/i.test(value.trim()) && !parseDateTimeExpression(value, now, dateFormat, true)) return true;
+      if (range.kind !== "deadline") continue;
+      if (!parseDateTimeExpression(task.raw.slice(range.from + 1, range.to - 1), now, dateFormat, true)) return true;
     }
   }
   return false;

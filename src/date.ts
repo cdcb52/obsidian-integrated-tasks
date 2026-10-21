@@ -139,7 +139,7 @@ const REPEAT_BEFORE = /\bevery\s+(?:(?:other|second|third|fourth|\d+(?:st|nd|rd|
 const PROPERTY_TEXT = new RegExp([
   String.raw`\{[^{}]*\}`, String.raw`[#~]\[\[[^\]]*\]\]`, String.raw`#[^\s#\[]\S*`, String.raw`(?:\d+h(?:\d+m)?|\d+m)`, String.raw`[pP][123]`,
   String.raw`every\s+(?:(?:other|second|third|fourth|\d+(?:st|nd|rd|th)?)\s+)?(?:day|week|month|year|sunday|monday|tuesday|wednesday|thursday|friday|saturday)s?`,
-  String.raw`>\S+`, String.raw`(?:✓|✅\s*)\S+`,
+  String.raw`(?:✓|✅\s*)\S+`,
   String.raw`(?:at\s+)?(?:(?:[01]?\d|2[0-3]):[0-5]\d(?:\s?[ap]m)?|(?:1[0-2]|0?[1-9])(?::[0-5]\d)?\s?[ap]m|noon|midnight)`
 ].map(part => `(?:${part})`).join("|"), "giu");
 

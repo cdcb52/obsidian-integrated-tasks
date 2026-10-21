@@ -45,18 +45,18 @@ interface DropdownSpec {
 
 const SORTS: Array<[TaskSort, string]> = [
   ["date", "Action date"], ["scheduledDate", "Scheduled date"], ["deadline", "Deadline"], ["priority", "Priority"], ["title", "Title"],
-  ["status", "Status"], ["duration", "Duration"], ["tags", "Tags"], ["source", "Note"], ["section", "Heading"], ["completed", "Completed date"], ["defer", "Hidden until"]
+  ["status", "Status"], ["duration", "Duration"], ["tags", "Tags"], ["source", "Note"], ["section", "Heading"], ["completed", "Completed date"]
 ];
 const GROUPS: Array<[TaskGrouping, string]> = [
   ["default", "View default"], ["none", "None"], ["date", "Action date"], ["scheduledDate", "Scheduled date"], ["deadline", "Deadline"], ["priority", "Priority"],
-  ["status", "Status"], ["tags", "Tags"], ["source", "Note"], ["section", "Heading"], ["duration", "Duration"], ["repeat", "Repeat"], ["defer", "Hidden until"], ["completed", "Completed date"]
+  ["status", "Status"], ["tags", "Tags"], ["source", "Note"], ["section", "Heading"], ["duration", "Duration"], ["repeat", "Repeat"], ["completed", "Completed date"]
 ];
 /** A grouping's name, as View options › Group lists it. */
 export const groupingLabel = (grouping: TaskGrouping): string => GROUPS.find(([value]) => value === grouping)?.[1] ?? grouping;
 const SECTIONS: Array<[string, Array<[TaskProperty, string, string]>]> = [
   ["Status & priority", [["status", "Status", "circle-dot"], ["priority", "Priority", "flag"]]],
   ["Dates", [["scheduledDate", "Scheduled", "calendar"], ["scheduledTime", "Scheduled time", "clock"], ["deadline", "Deadline", "calendar-clock"],
-    ["deadlineTime", "Deadline time", "alarm-clock"], ["defer", "Hidden until", "eye-off"], ["completed", "Completed", "check-check"]]],
+    ["deadlineTime", "Deadline time", "alarm-clock"], ["completed", "Completed", "check-check"]]],
   ["Details", [["tags", "Tags", "tag"], ["duration", "Duration", "timer"], ["repeat", "Repeat", "repeat"], ["title", "Title", "text"]]],
   ["Location", [["source", "Note", "file-text"], ["section", "Heading", "heading"]]]
 ];
@@ -71,7 +71,6 @@ function presets(property: Property): Preset[] {
     { label: "Today", condition: { operator: "is", values: ["today"] } },
     ...(key === "completed" ? [{ label: "Yesterday", condition: { operator: "is" as const, values: ["today-1"] } }, { label: "Past 7 days", condition: { operator: "between" as const, values: ["today-7", "today"] } }]
       : [{ label: "Tomorrow", condition: { operator: "is" as const, values: ["today+1"] } }, { label: "Next 7 days", condition: { operator: "between" as const, values: ["today", "today+7"] } }]),
-    ...(key === "defer" ? [{ label: "Someday", condition: { operator: "is" as const, values: ["Someday"] } }] : []),
     { label: "Has a date", condition: { operator: "has", values: [] } },
     { label: "No date", condition: { operator: "missing", values: [] } },
     { label: "Custom…", custom: true }

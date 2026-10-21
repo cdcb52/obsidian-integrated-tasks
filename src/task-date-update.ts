@@ -15,11 +15,6 @@ export function updateTaskDateTokens(content: string, sourceFormats: string[], t
     const scheduled = ranges.filter(range => range.kind === "scheduledDate").sort((a, b) => a.from - b.from);
     let updated = text;
     for (const range of ranges.sort((a, b) => b.from - a.from)) {
-      if (range.kind === "defer" && task.deferDate) {
-        const label = formatDate(task.deferDate, targetFormat);
-        updated = updated.slice(0, range.from) + `>${linkDates ? `[[${label}]]` : label}` + updated.slice(range.to);
-        continue;
-      }
       // The Tasks plugin's `✅ YYYY-MM-DD` keeps its own form.
       if (range.kind === "completedDate" && task.completedDate && !text.startsWith("✅", range.from)) {
         const label = formatDate(task.completedDate, targetFormat);

@@ -8,10 +8,6 @@ export interface ParsedTaskMetadata {
   scheduledTime?: string;
   deadline?: string;
   deadlineTime?: string;
-  /** Hidden from Inbox, Today and Upcoming before this ISO date. */
-  deferDate?: string;
-  /** Hidden from Inbox, Today and Upcoming until the defer is cleared. */
-  someday?: boolean;
   /** Inline repeat rule such as "every week"; completing the task advances its dates in place. */
   repeat?: string;
   /** ISO date the task was completed, when completion dates are recorded. */
@@ -75,7 +71,7 @@ export interface TaskViewState {
   markdownState?: Record<string, unknown>;
 }
 
-export type TaskProperty = "tags" | "title" | "priority" | "scheduledDate" | "scheduledTime" | "deadline" | "deadlineTime" | "defer" | "repeat" | "completed" | "duration" | "source" | "section" | "status";
+export type TaskProperty = "tags" | "title" | "priority" | "scheduledDate" | "scheduledTime" | "deadline" | "deadlineTime" | "repeat" | "completed" | "duration" | "source" | "section" | "status";
 export type TaskSort = "date" | TaskProperty;
 export type TaskGrouping = "default" | "none" | "date" | TaskProperty;
 export type FilterOperator = "has" | "missing" | "is" | "isNot" | "contains" | "before" | "after" | "between";

@@ -602,7 +602,7 @@ it("opens the editor for one task, the menu for several, and clears the selectio
   expect(openEditor).toHaveBeenLastCalledWith(expect.objectContaining({ task: tasks[2] }));
 });
 
-it.each([["tags", "tags"], ["repeat", "repeat"], ["defer", "snooze"]] as const)("property clicks edit %s in a popover for the selection", (property, editor) => {
+it.each([["tags", "tags"], ["repeat", "repeat"]] as const)("property clicks edit %s in a popover for the selection", (property, editor) => {
   const { view, internals, rows, tasks, openEditor } = selectionView();
   const popover = vi.spyOn(TaskPropertyEditors.prototype, editor).mockImplementation(() => {});
   onTestFinished(() => popover.mockRestore());

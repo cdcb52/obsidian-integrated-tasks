@@ -1,4 +1,5 @@
-import type { SmartList, SmartListScope, TaskFilter, TaskProperty } from "./types";
+import { TASK_PROPERTIES } from "./task-properties";
+import type { SmartList, SmartListScope, TaskFilter, TaskGrouping, TaskProperty, TaskSort } from "./types";
 
 export function cloneTaskFilters(filters: readonly TaskFilter[]): TaskFilter[] {
   return filters.map(filter => ({
@@ -16,6 +17,17 @@ export function smartListDraft(list?: SmartList): SmartListDraft {
   return list ? { name: list.name, filters: cloneTaskFilters(list.filters), sort: list.sort, descending: list.descending, grouping: list.grouping,
     ...(list.showProjects === false ? { showProjects: false } : {}), ...(list.scope ? { scope: list.scope } : {}) }
     : { name: "", filters: [], sort: "date", descending: false, grouping: "default" };
+}
+
+/**
+ * Saved View options or a smart list, rid of a property that no longer exists: filters on it go, and a sort or grouping
+ * by it goes back to the default.
+ */
+export function forgetUnknownProperties(options: { filters?: TaskFilter[]; sort?: TaskSort; grouping?: TaskGrouping }): void {
+  const known = (key: unknown): boolean => TASK_PROPERTIES.some(property => property.key === key);
+  if (Array.isArray(options.filters)) options.filters = options.filters.filter(filter => known(filter?.property));
+  if (typeof options.sort === "string" && options.sort !== "date" && !known(options.sort)) options.sort = "date";
+  if (typeof options.grouping === "string" && !["default", "none", "date"].includes(options.grouping) && !known(options.grouping)) options.grouping = "default";
 }
 
 /** The view a smart list narrows, by name: "Today", a project's or a tag's. */

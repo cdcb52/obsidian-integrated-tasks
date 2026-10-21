@@ -142,9 +142,6 @@ describe("view options panel", () => {
     select("duration").click();
     option("Under 30m").click();
     expect(state.filters[1]).toEqual({ property: "duration", operator: "before", values: ["30"] });
-    select("defer").click();
-    option("Someday").click();
-    expect(state.filters[2]).toEqual({ property: "defer", operator: "is", values: ["Someday"] });
   });
 
   it("filters titles by text and opens the detailed editor for other conditions", () => {

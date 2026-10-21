@@ -7,10 +7,10 @@ const convert = (line: string, overrides: Partial<TasksImportOptions> = {}) => c
 
 describe("Tasks plugin import", () => {
   it("converts emoji dates, priority, recurrence and tags", () => {
-    const result = convert("- [ ] Pay rent ⏫ 🔁 every month ⏳ 2026-09-28 📅 2026-10-01 🛫 2026-09-25 ➕ 2026-09-01 #home");
-    expect(result.line).toBe("- [ ] Pay rent Sep 28, 2026 {Oct 1, 2026} every month >Sep 25, 2026 p1 #[[home]]");
+    const result = convert("- [ ] Pay rent ⏫ 🔁 every month ⏳ 2026-09-28 📅 2026-10-01 ➕ 2026-09-01 #home");
+    expect(result.line).toBe("- [ ] Pay rent Sep 28, 2026 {Oct 1, 2026} every month p1 #[[home]]");
     expect(parseTaskLine(result.line, options.reference, options.dateFormat)).toMatchObject({
-      title: "Pay rent", scheduledDate: "2026-09-28", deadline: "2026-10-01", deferDate: "2026-09-25", priority: 1, repeat: "every month", tags: ["home"]
+      title: "Pay rent", scheduledDate: "2026-09-28", deadline: "2026-10-01", priority: 1, repeat: "every month", tags: ["home"]
     });
   });
 
@@ -55,6 +55,14 @@ describe("Tasks plugin import", () => {
     expect(convert("- [!] Important 📅 2026-10-01")).toEqual({ line: "- [!] Important 📅 2026-10-01", changed: false, skips: ["status"] });
     expect(convert("1. [ ] Numbered 📅 2026-10-01").changed).toBe(false);
     expect(convert("- [ ] Blocked ⛔ abc123 📅 2026-10-01").skips).toEqual(["dependency"]);
+  });
+
+  it("keeps start dates as text, counting each once", () => {
+    expect(convert("- [ ] Pay rent 🛫 2026-09-25 📅 2026-10-01")).toEqual({ line: "- [ ] Pay rent 🛫2026-09-25 {Oct 1, 2026}", changed: true, skips: ["start"] });
+    expect(convert("- [ ] Plan trip [start:: 2026-09-25] [due:: 2026-10-01] [cancelled:: 2026-09-30]"))
+      .toEqual({ line: "- [ ] Plan trip 🛫2026-09-25 ❌2026-09-30 {Oct 1, 2026}", changed: true, skips: ["start", "cancelled"] });
+    expect(parseTaskLine("- [ ] Pay rent 🛫2026-09-25 {Oct 1, 2026}", options.reference, options.dateFormat)).toMatchObject({ title: "Pay rent 🛫2026-09-25", deadline: "2026-10-01" });
+    expect(skipLabel("start", 2)).toBe("2 start dates kept as text.");
   });
 
   it("converts in-progress, waiting and cancelled tasks, keeping their status", () => {

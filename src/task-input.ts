@@ -42,7 +42,7 @@ export function parseTaskTreeInput(input: string, destination: string, reference
 }
 
 /**
- * The text with its tokens (already read) masked, so no date is read inside them (a `>tomorrow` defer is no schedule)
+ * The text with its tokens (already read) masked, so no date is read inside them (a `{tomorrow}` deadline is no schedule)
  * and a date in words before them still ends the title. The mask keeps places, and Chrono never joins across it.
  */
 function maskTokens(text: string, tokens: Array<{ from: number; to: number }>): string {
@@ -91,7 +91,7 @@ export function taskInputRanges(text: string, original = "", reference = new Dat
 
 /**
  * The highlight a token gets as it is typed, by what it sets: dates, times and durations blue, the deadline red,
- * a priority its own colour, tags grey, the project green, anything else (a repeat, a defer) the accent.
+ * a priority its own colour, tags grey, the project green, anything else (a repeat, a completion date) the accent.
  */
 export function tokenHighlightClass(kind: InputTokenKind, text: string): string {
   const look = kind === "scheduledDate" || kind === "durationMinutes" ? "is-date"

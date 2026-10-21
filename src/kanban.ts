@@ -3,8 +3,6 @@ import { taskGroupTarget, type ListDropGroup } from "./list-drag";
 import { STATUS_LABELS, TASK_STATUSES } from "./task-status";
 import type { Task, TaskGrouping } from "./types";
 
-const deferRank = (title: string): number => title === "Not hidden" ? 2 : title === "Someday" ? 1 : 0;
-
 export interface KanbanColumn { title: string; tasks: Task[]; target?: ListDropGroup; alert?: boolean }
 export function kanbanColumns(tasks: Task[], grouping: TaskGrouping): KanbanColumn[] {
   if (grouping === "none") return [{ title: "Tasks", tasks }];
@@ -16,8 +14,5 @@ export function kanbanColumns(tasks: Task[], grouping: TaskGrouping): KanbanColu
     const title = value ? `P${value}` : "No priority";
     return { title, tasks: groups.get(title) ?? [], target: { property, value } };
   });
-  // Dates ascending, then Someday, then tasks without a defer; independent of the list sort.
-  if (property === "defer") return [...groups].sort(([a], [b]) => deferRank(a) - deferRank(b) || a.localeCompare(b))
-    .map(([title, tasks]) => ({ title, tasks, target: { property, value: title === "Not hidden" ? undefined : title } }));
   return [...groups].map(([title, tasks]) => ({ title, tasks, target: taskGroupTarget(property, tasks[0]) }));
 }

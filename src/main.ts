@@ -7,7 +7,7 @@ import { isRepeatingTask, recurringFile, type RecurringOutcome } from "./recurri
 import { shiftCalendar, type CalendarScope } from "./calendar";
 import { scanTasks } from "./parser";
 import { applyProjectDraft, projectEditDraft } from "./project-editor";
-import { cloneTaskFilters } from "./task-filters";
+import { cloneTaskFilters, forgetUnknownProperties } from "./task-filters";
 import { SmartListEditorModal, type SmartListDraft } from "./smart-list-editor";
 import { ProjectCreatorModal, projectFolderPath, projectNotePath, projectNoteContent, type ProjectDraft } from "./project-creator";
 import { setTagFormat as useTagFormat, type TagFormat } from "./task-tags";
@@ -366,6 +366,8 @@ export default class TaskManagerPlugin extends Plugin {
     const layouts: unknown = this.settings.viewLayouts;
     this.settings.viewLayouts = layouts && typeof layouts === "object" && !Array.isArray(layouts)
       ? Object.fromEntries(Object.entries(layouts as Record<string, unknown>).filter((entry): entry is [string, ViewLayout] => ["calendar", "kanban", "gantt"].includes(String(entry[1])))) : {};
+    // Lists and views saved with a property that no longer exists drop its filters, sort and grouping.
+    for (const saved of [...this.settings.smartLists, ...Object.values(this.settings.viewOptions)]) if (saved && typeof saved === "object") forgetUnknownProperties(saved);
     const periods: unknown = this.settings.viewPeriods;
     this.settings.viewPeriods = periods && typeof periods === "object" && !Array.isArray(periods) ? { ...periods as Record<string, ViewPeriod> } : {};
     for (const key of ["ignoredPaths", "ignoredTags"] as const) {

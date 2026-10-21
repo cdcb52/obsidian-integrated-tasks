@@ -1,10 +1,8 @@
 import { Notice } from "obsidian";
 import type TaskManagerPlugin from "./main";
 import type { BulkTaskPatch } from "./bulk-tasks";
-import { addDays } from "./calendar";
 import { openChoicePopover, PRIORITY_CHOICES, projectChoices, repeatChoices, REPEAT_INPUT, type Choice, type ChoiceInput } from "./choice-popover";
-import { formatDate, parseDateExpression, todayIso } from "./date";
-import { nextWeek, openDatePopover } from "./date-popover";
+import { openDatePopover } from "./date-popover";
 import type { TaskEditorProperty } from "./task-editor";
 import { openTagsPopover } from "./task-menu";
 import { STATUS_ICONS, STATUS_LABELS, TASK_STATUSES } from "./task-status";
@@ -25,7 +23,7 @@ export interface PropertyEditorHost {
 
 /**
  * The popovers that edit task properties, for one task or several at once: a date (with its time and duration),
- * priority, project, tags, repeat, snooze and status. A task view's rows, menu and keys open them, and so does the
+ * priority, project, tags, repeat and status. A task view's rows, menu and keys open them, and so does the
  * Task Details sidebar.
  */
 export class TaskPropertyEditors {
@@ -33,13 +31,12 @@ export class TaskPropertyEditors {
 
   private get plugin(): TaskManagerPlugin { return this.host.plugin; }
 
-  /** The popover for `property` beside `anchor`: dates, times and durations, priority, tags, repeat or snooze. False for anything else. */
+  /** The popover for `property` beside `anchor`: dates, times and durations, priority, tags or repeat. False for anything else. */
   open(tasks: Task[], property: TaskEditorProperty, anchor: HTMLElement): boolean {
     if (!tasks.length) return false;
     if (this.date(tasks, property, anchor)) return true;
     if (property === "tags") this.tags(tasks, anchor);
     else if (property === "repeat") this.repeat(tasks, anchor);
-    else if (property === "defer") this.snooze(tasks, anchor);
     else return false;
     return true;
   }
@@ -160,34 +157,6 @@ export class TaskPropertyEditors {
         const repeat = value || undefined;
         const changed = tasks.filter(task => task.repeat !== repeat);
         if (changed.length) void this.host.updateTasks(changed, { repeat });
-      }
-    });
-  }
-
-  /** Snoozing hides a task from Inbox, Today and Upcoming until the date (see isDeferred). */
-  snooze(tasks: Task[], anchor: HTMLElement, beside = false, done?: () => void): void {
-    const today = todayIso();
-    const choices: Choice[] = [
-      { value: addDays(today, 1), label: "Until tomorrow", icon: "sunrise" },
-      { value: nextWeek(today), label: "Until next week", icon: "square-arrow-right" },
-      { value: "someday", label: "Someday", icon: "archive" }
-    ];
-    if (tasks.some(task => task.deferDate || task.someday)) choices.push({ value: "", label: "Stop snoozing", icon: "alarm-clock", separated: true });
-    const current = tasks.every(task => task.someday) ? "someday" : tasks.every(task => task.deferDate && task.deferDate === tasks[0].deferDate) ? tasks[0].deferDate : undefined;
-    openChoicePopover({
-      anchor, beside, label: "Snooze", choices, selected: current,
-      input: {
-        placeholder: "Snooze until, e.g. next fri", invalid: "Not a date",
-        parse: text => {
-          if (/^some ?day$/i.test(text)) return { value: "someday", label: "Someday" };
-          const date = parseDateExpression(text, new Date(), this.plugin.dateFormat());
-          return date ? { value: date, label: `Until ${formatDate(date, "ddd, MMM D, YYYY")}` } : undefined;
-        }
-      },
-      choose: value => {
-        done?.();
-        const patch: BulkTaskPatch = value === "someday" ? { deferDate: undefined, someday: true } : { deferDate: value || undefined, someday: undefined };
-        void this.host.updateTasks(tasks, patch);
       }
     });
   }

@@ -37,6 +37,14 @@ describe("task parser", () => {
     expect(parseTaskLine("- [ ] Link [[Design notes]]", reference)?.title).toBe("Link [[Design notes]]");
   });
 
+  it("reads a `>` word as title text, and keeps it when the task changes", () => {
+    expect(parseTaskLine("- [ ] Renew passport >2026-11-01", reference)).toEqual({ title: "Renew passport >2026-11-01", indent: 0, status: "todo", completed: false });
+    expect(parseTaskLine("- [ ] Idea >someday #[[later]]", reference)).toMatchObject({ title: "Idea >someday", tags: ["later"] });
+    const raw = "- [ ] Renew passport >2026-11-01 p2";
+    const parsed = parseTaskLine(raw, reference)!;
+    expect(rewriteTaskLine(raw, { ...parsed, priority: 1, destination: "" }, undefined, true, reference)).toBe("- [ ] Renew passport >2026-11-01 p1");
+  });
+
   it("rejects invalid dates without consuming them", () => {
     const parsed = parseTaskLine("- [ ] Impossible [[2026-02-30]]", reference);
     expect(parsed?.scheduledDate).toBeUndefined();

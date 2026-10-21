@@ -16,7 +16,7 @@ export interface TasksImportOptions {
   reference?: Date;
 }
 
-export type TasksImportSkip = "status" | "numbered" | "repeat" | "whenDone" | "dependency" | "cancelled";
+export type TasksImportSkip = "status" | "numbered" | "repeat" | "whenDone" | "dependency" | "start" | "cancelled";
 
 const SKIP_LABELS: Record<TasksImportSkip, [string, string, string]> = {
   status: ["task", "tasks", "with an unsupported status, such as [!] or [>], left unchanged"],
@@ -25,6 +25,7 @@ const SKIP_LABELS: Record<TasksImportSkip, [string, string, string]> = {
   // Converted, but repeating from the task's date rather than from when it's done.
   whenDone: ["repeat rule", "repeat rules", "with “when done” converted to a fixed schedule"],
   dependency: ["task", "tasks", "with IDs, dependencies, or on-completion actions, kept as text"],
+  start: ["start date", "start dates", "kept as text"],
   cancelled: ["cancelled date", "cancelled dates", "kept as text"]
 };
 
@@ -41,13 +42,13 @@ const TASK = /^(\s*)([-*+]|\d+[.)])(\s+)\[(.)\](\s+)(.*)$/;
 const VS = "\\uFE0F?";
 const DATE = "(\\d{4}-\\d{2}-\\d{2})";
 const SIGNIFIERS = "📅⏳🛫✅➕❌🔁🔺⏫🔼🔽⏬🆔⛔🏁";
-const DATE_FIELDS: Array<[string, "deadline" | "scheduledDate" | "deferDate" | "completedDate" | "created" | "cancelled"]> = [
-  ["📅", "deadline"], ["⏳", "scheduledDate"], ["🛫", "deferDate"], ["✅", "completedDate"], ["➕", "created"], ["❌", "cancelled"]
+const DATE_FIELDS: Array<[string, "deadline" | "scheduledDate" | "start" | "completedDate" | "created" | "cancelled"]> = [
+  ["📅", "deadline"], ["⏳", "scheduledDate"], ["🛫", "start"], ["✅", "completedDate"], ["➕", "created"], ["❌", "cancelled"]
 ];
 const PRIORITIES: Array<[string, Priority]> = [["🔺", 1], ["⏫", 1], ["🔼", 2], ["🔽", 3], ["⏬", 3]];
 const PRIORITY_WORDS: Record<string, Priority> = { highest: 1, high: 1, medium: 2, low: 3, lowest: 3 };
-const DATAVIEW_FIELDS: Record<string, "deadline" | "scheduledDate" | "deferDate" | "completedDate" | "created" | "cancelled" | "priority" | "repeat"> = {
-  due: "deadline", scheduled: "scheduledDate", start: "deferDate", completion: "completedDate", created: "created", cancelled: "cancelled", priority: "priority", repeat: "repeat"
+const DATAVIEW_FIELDS: Record<string, "deadline" | "scheduledDate" | "start" | "completedDate" | "created" | "cancelled" | "priority" | "repeat"> = {
+  due: "deadline", scheduled: "scheduledDate", start: "start", completion: "completedDate", created: "created", cancelled: "cancelled", priority: "priority", repeat: "repeat"
 };
 
 /** Convert one checklist line; lines without Tasks-plugin syntax come back unchanged. */
@@ -57,7 +58,7 @@ export function convertTasksLine(line: string, options: TasksImportOptions): Tas
   const [, indent, marker, , status, , text] = match;
   let body = text;
   const skips: TasksImportSkip[] = [];
-  const found: Partial<Record<"deadline" | "scheduledDate" | "deferDate" | "completedDate", string>> & { priority?: Priority; repeat?: string } = {};
+  const found: Partial<Record<"deadline" | "scheduledDate" | "completedDate", string>> & { priority?: Priority; repeat?: string } = {};
   let touched = false;
   // `use` returns true to remove the matched text (converted), false to keep it, or replacement text to keep.
   const take = (pattern: RegExp, use: (...groups: string[]) => boolean | string): void => {
@@ -91,14 +92,16 @@ export function convertTasksLine(line: string, options: TasksImportOptions): Tas
     if (field === "repeat") return repeat(trimmed);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return false;
     if (field === "created") return options.dropCreatedDates || keepDate("➕", trimmed);
-    if (field === "cancelled") { skips.push("cancelled"); return keepDate("❌", trimmed); }
+    // Kept in its emoji form, which the emoji pass below then counts.
+    if (field === "start") return keepDate("🛫", trimmed);
+    if (field === "cancelled") return keepDate("❌", trimmed);
     found[field] = trimmed;
     return true;
   });
   for (const [emoji, field] of DATE_FIELDS) {
     take(new RegExp(`${emoji}${VS}\\s*${DATE}`, "gu"), date => {
       if (field === "created") return options.dropCreatedDates || keepDate(emoji, date);
-      if (field === "cancelled") { skips.push("cancelled"); return keepDate(emoji, date); }
+      if (field === "start" || field === "cancelled") { skips.push(field); return keepDate(emoji, date); }
       found[field] = date;
       return true;
     });
@@ -132,7 +135,6 @@ export function convertTasksLine(line: string, options: TasksImportOptions): Tas
     ...parsed, destination: "",
     ...(found.scheduledDate ? { scheduledDate: found.scheduledDate } : {}),
     ...(found.deadline ? { deadline: found.deadline } : {}),
-    ...(found.deferDate ? { deferDate: found.deferDate, someday: undefined } : {}),
     ...(found.completedDate ? { completedDate: found.completedDate } : {}),
     ...(found.priority ? { priority: found.priority } : {}),
     ...(found.repeat ? { repeat: found.repeat } : {}),

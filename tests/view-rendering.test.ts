@@ -391,7 +391,7 @@ describe("keyboard", () => {
       return document.querySelector<HTMLElement>(".tm-date-popover, .tm-choice-popover, .tm-tags-popover")?.getAttribute("aria-label");
     };
     expect([opened("d"), opened("D", true), opened("p"), opened("t"), opened("g"), opened("r"), opened("S", true)])
-      .toEqual(["When", "Deadline", "Priority", "Tags", "Move to project", "Repeat", "Snooze"]);
+      .toEqual(["When", "Deadline", "Priority", "Tags", "Move to project", "Repeat", undefined]);
   });
 
   it("marks each status on the row and in the checkbox's name, and reopens a cancelled task from its checkbox", async () => {
@@ -412,7 +412,7 @@ describe("keyboard", () => {
   });
 });
 
-describe("undo and snooze", () => {
+describe("undo and select all", () => {
   it("undoes on Cmd+Z and redoes on Cmd+Shift+Z, but not while typing in a field", async () => {
     const { view, content, plugin } = await setup([note("A.md", 2)]);
     await view.onOpen();
@@ -443,22 +443,6 @@ describe("undo and snooze", () => {
     expect(rows(content()).map(row => row.classList.contains("is-selection-continues"))).toEqual([true, true, false]);
     rows(content())[1].dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, metaKey: true }));
     expect(rows(content()).map(row => row.classList.contains("is-selection-continues"))).toEqual([false, false, false]);
-  });
-
-  it("snoozes from the Shift+S list, offering Stop snoozing only for a snoozed task, which stays visible in All Tasks", async () => {
-    const { view, content, store, index } = await setup([["A.md", "- [ ] Later >someday\n- [ ] Now"]]);
-    const bulkUpdate = vi.fn().mockResolvedValue([]);
-    (store as unknown as { bulkUpdate: typeof bulkUpdate }).bulkUpdate = bulkUpdate;
-    await view.setState({ mode: "all" });
-    const row = (title: string) => rows(content()).find(item => item.textContent!.includes(title))!;
-    expect(row("Later").querySelector(".tm-task-defer")).toBeNull();
-    const values = () => Array.from(document.querySelectorAll(".tm-choice-popover [role=option]")).map(option => option.getAttribute("data-value"));
-    act(row("Later"), "S", { shiftKey: true });
-    expect(values()).toContain("");
-    act(row("Now"), "S", { shiftKey: true });
-    expect(values()).not.toContain("");
-    document.querySelector<HTMLElement>(".tm-choice-popover [data-value='someday']")!.click();
-    expect(bulkUpdate).toHaveBeenLastCalledWith([index.allTasks().find(task => task.title === "Now")], { deferDate: undefined, someday: true });
   });
 });
 

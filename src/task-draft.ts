@@ -10,8 +10,6 @@ export function draftFromTask(task: Task): TaskDraft {
     scheduledTime: task.scheduledTime,
     deadline: task.deadline,
     deadlineTime: task.deadlineTime,
-    deferDate: task.deferDate,
-    someday: task.someday,
     repeat: task.repeat,
     completedDate: task.completedDate,
     durationMinutes: task.durationMinutes,
@@ -25,7 +23,7 @@ export function draftFromTask(task: Task): TaskDraft {
 }
 
 /** Properties a typed title can set; anything it does not mention keeps the task's value. */
-const TYPED: Array<keyof ParsedTaskMetadata> = ["scheduledDate", "scheduledTime", "deadline", "deadlineTime", "deferDate", "someday", "repeat", "durationMinutes", "priority"];
+const TYPED: Array<keyof ParsedTaskMetadata> = ["scheduledDate", "scheduledTime", "deadline", "deadlineTime", "repeat", "durationMinutes", "priority"];
 
 /**
  * A task retitled with `text`, where properties typed into it apply as in the task editor:

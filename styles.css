@@ -1138,7 +1138,7 @@ button.tm-gantt-handle.is-finish:focus-visible,
 .tm-task-tag, .tm-task-due { display: inline-flex; align-items: center; gap: 4px; }
 .tm-task-tag { max-width: 100%; overflow-wrap: anywhere; }
 .tm-task-detail-icon, .tm-task-recurring { display: inline-flex; align-items: center; flex-shrink: 0; }
-/* An icon's pill (a tag, Hidden until) sits on the line's baseline by its text, as the properties without an icon do:
+/* An icon's pill (a tag) sits on the line's baseline by its text, as the properties without an icon do:
    left to its icon, it would sit on the icon's bottom edge instead, higher than the rest. */
 .tm-task-metadata .tm-task-detail-icon + span { align-self: baseline; }
 .tm-task-detail-icon svg, .tm-task-recurring svg { width: 0.95em; height: 0.95em; }
@@ -1427,12 +1427,6 @@ button.tm-gantt-handle::after { content: ""; position: absolute; top: 0; bottom:
   background: transparent;
 }
 .tm-task-due.is-distant { color: var(--text-muted); }
-
-/* Defers stay quiet; a defer that is hiding the task reads slightly stronger. */
-.tm-task-defer { display: inline-flex; align-items: center; gap: 4px; color: var(--text-faint); cursor: pointer; white-space: nowrap; }
-.tm-main-view .tm-task-item .tm-task-defer, .tm-main-view .tm-task-item .tm-task-defer > span { font-size: inherit; }
-.tm-task-defer:hover { color: var(--text-normal); }
-.tm-task-defer.is-active { color: var(--text-muted); font-style: italic; }
 
 .tm-editor-task-line {
   display: flex;

@@ -769,8 +769,8 @@ export class TaskMainView extends ItemView {
       // Grouped by the property the list is sorted on, a descending sort also turns the groups around.
       for (const [key, group] of groupTasks(tasks, this.grouping, this.descending && this.sort === this.grouping)) {
         // Date groupings are keyed by ISO date; show them in the user's format.
-        const title = ["date", "scheduledDate", "deadline", "defer"].includes(this.grouping) && /^\d{4}-\d{2}-\d{2}$/.test(key)
-          ? `${this.grouping === "defer" ? "Hidden until " : ""}${formatDate(key, this.plugin.dateFormat())}`
+        const title = ["date", "scheduledDate", "deadline"].includes(this.grouping) && /^\d{4}-\d{2}-\d{2}$/.test(key)
+          ? formatDate(key, this.plugin.dateFormat())
           : this.grouping === "source" ? key.replace(/\.md$/i, "") : key;
         this.renderSection(container, title, group, undefined, taskGroupTarget(this.grouping, group[0]));
       }
@@ -863,7 +863,7 @@ export class TaskMainView extends ItemView {
       const section = board.createEl("section", { cls: `tm-kanban-column${column.alert ? " is-alert" : ""}`, attr: { "data-tm-scroll-key": `kanban:${column.title}` } });
       const header = section.createDiv({ cls: "tm-kanban-column-header" });
       // Date columns are keyed by ISO date; show them in the user's format (Overdue and Today keep their names).
-      const title = column.target?.property && ["date", "scheduledDate", "deadline", "defer"].includes(column.target.property) && /^\d{4}-\d{2}-\d{2}$/.test(column.title)
+      const title = column.target?.property && ["date", "scheduledDate", "deadline"].includes(column.target.property) && /^\d{4}-\d{2}-\d{2}$/.test(column.title)
         ? formatDate(column.title, this.plugin.dateFormat()) : column.target?.property === "source" ? column.title.replace(/\.md$/i, "") : column.title;
       header.createEl("h2", { text: title });
       this.renderGroupAddButton(header, title, column.target);
@@ -1747,7 +1747,7 @@ export class TaskMainView extends ItemView {
 
   /**
    * The right-click menu, for the selection when the task is selected: complete, dates and priority at once,
-   * project, deadline, tags, repeat, snooze and status in popovers beside it, duplicate and delete.
+   * project, deadline, tags, repeat and status in popovers beside it, duplicate and delete.
    */
   private openTaskMenu(task: Task, row: HTMLElement, at: { x: number; y: number }): void {
     const tasks = this.selection.has(task) ? this.getSelectedTasks() : [task];
@@ -1768,7 +1768,6 @@ export class TaskMainView extends ItemView {
         { label: "Deadline", icon: "flag", key: "D", open: anchor => void this.editors.date(tasks, "deadline", anchor, true, () => menu.close()) },
         { label: "Tags", icon: "tag", key: "t", open: anchor => this.editors.tags(tasks, anchor, true) },
         { label: "Repeat", icon: "repeat", key: "r", open: anchor => this.editors.repeat(tasks, anchor, true, () => menu.close()) },
-        { label: "Snooze", icon: "alarm-clock-off", key: "S", open: anchor => this.editors.snooze(tasks, anchor, true, () => menu.close()) },
         { label: "Status", icon: "circle-dot", key: "s", open: anchor => this.editors.status(task, tasks, anchor, () => menu.close()) }
       ],
       duplicate: () => void this.commit(() => this.plugin.store.duplicate(tasks), "Could not duplicate the task."),
@@ -2067,7 +2066,7 @@ export class TaskMainView extends ItemView {
 
   /**
    * What a letter does to the selected tasks, popovers opening below the row: E actions, M move, Shift+T today, D date,
-   * Shift+D deadline, P priority, T tags, G project, R repeat, S status, Shift+S snooze, C complete (or reopen).
+   * Shift+D deadline, P priority, T tags, G project, R repeat, S status, C complete (or reopen).
    */
   private rowShortcut(letter: string, shift: boolean): ((task: Task, row: HTMLElement) => void) | undefined {
     const tasks = (task: Task): Task[] => this.selection.has(task) ? this.getSelectedTasks() : [task];
@@ -2082,7 +2081,6 @@ export class TaskMainView extends ItemView {
       g: (task, row) => this.editors.project(tasks(task), row),
       r: (task, row) => this.editors.repeat(tasks(task), row),
       s: (task, row) => this.editors.status(task, tasks(task), row, undefined, false),
-      "shift+s": (task, row) => this.editors.snooze(tasks(task), row),
       c: task => { const all = tasks(task); this.setStatus(task, all.every(item => item.completed) ? "todo" : "done", all); }
     };
     return shortcuts[shift ? `shift+${letter}` : letter];
@@ -2206,7 +2204,7 @@ export class TaskMainView extends ItemView {
     const implicitSource = this.taskSourcePath ?? (this.state.mode === "inbox" ? this.plugin.settings.inboxPath : undefined);
     const tags = this.rowTags(task);
     const details = {
-      grouping: this.metadataGrouping, dateFormat: this.plugin.dateFormat(), show: (property: TaskProperty) => property !== "defer",
+      grouping: this.metadataGrouping, dateFormat: this.plugin.dateFormat(),
       source: task.path !== implicitSource ? task.path : undefined, tags,
       edit: (property: TaskEditorProperty) => this.editTask(task, property), openSource: () => { void this.openSource(task); },
       openTag: (tag: string) => void this.openTagView(tag)
@@ -2348,7 +2346,7 @@ export class TaskMainView extends ItemView {
     renderThingsTaskCard(list, {
       task, depth, draft: expanded, tags: this.rowTags(task), focus, dateFormat: this.plugin.dateFormat(), repeating: isRepeatingTask(this.app, task),
       childDetails: child => ({
-        grouping: "none", dateFormat: this.plugin.dateFormat(), show: property => property !== "defer", tags: this.rowTags(child),
+        grouping: "none", dateFormat: this.plugin.dateFormat(), tags: this.rowTags(child),
         todayMarker: this.state.mode !== "today", edit: property => void this.editFromCard(child.id, property), openSource: () => {},
         openTag: tag => void this.openTagView(tag)
       }),
@@ -2520,7 +2518,7 @@ export class TaskMainView extends ItemView {
     });
   }
 
-  /** A property's popover, beside `anchor` (else the task's row): dates, times and durations, priority, tags, repeat or snooze. False for anything else. */
+  /** A property's popover, beside `anchor` (else the task's row): dates, times and durations, priority, tags or repeat. False for anything else. */
   private openPropertyEditor(tasks: Task[], property: TaskEditorProperty, anchor = this.popoverAnchor()): boolean {
     const target = anchor ?? (tasks[0] && this.selectionRows.get(tasks[0].id)?.[0]) ?? this.content;
     return Boolean(target) && this.editors.open(tasks, property, target);

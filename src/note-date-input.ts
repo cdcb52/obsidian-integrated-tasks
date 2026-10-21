@@ -29,7 +29,7 @@ function acceptsExpression(expression: string, previousWord: string, dateFormat:
 
 /**
  * Resolve an unmarked date only at the end of the title prose (after which only metadata tokens
- * may follow), the last `{…}` deadline and a trailing `>…` defer. Existing date links win over earlier prose.
+ * may follow) and the last `{…}` deadline. Existing date links win over earlier prose.
  */
 export function noteDateChanges(text: string, dateFormat: string, reference = new Date(), linkDates = true): { from: number; to: number; insert: string }[] {
   return readNoteDates(text, dateFormat, reference, linkDates).changes;
@@ -49,16 +49,8 @@ function readNoteDates(text: string, dateFormat: string, reference: Date, linkDa
   const checkbox = /^\s*-\s+\[[ xX/?-]\]\s/.exec(text)?.[0] ?? "";
   const ranges: ParsedTokenRange[] = [];
   parseTaskLine(text, reference, dateFormat, false, ranges);
-  const deferRange = ranges.find(range => range.kind === "defer");
-  let defer: Change | undefined;
-  if (deferRange) {
-    const expression = text.slice(deferRange.from + 1, deferRange.to);
-    const dateTime = /^someday$|^\[\[/i.test(expression) ? undefined : parseDateTimeExpression(expression, reference, dateFormat);
-    const label = dateTime && formatDate(dateTime.date, dateFormat);
-    if (label) defer = { from: deferRange.from + 1, to: deferRange.to, insert: linkDates ? `[[${label}]]` : label };
-  }
-  // A defer, an `every …` repeat and a completion date are never read as a schedule.
-  const source = ranges.filter(range => range.kind === "defer" || range.kind === "repeat" || range.kind === "completedDate")
+  // An `every …` repeat and a completion date are never read as a schedule.
+  const source = ranges.filter(range => range.kind === "repeat" || range.kind === "completedDate")
     .reduce((value, range) => value.slice(0, range.from) + blank(value.slice(range.from, range.to)) + value.slice(range.to), text);
   const protectedText = blank(checkbox) + source.slice(checkbox.length)
     .replace(/(`+)[\s\S]*?\1|\[[^\]]*\]\([^)]*\)|https?:\/\/\S+|\S+@\S+\.\S+/g, opaque);
@@ -101,8 +93,6 @@ function readNoteDates(text: string, dateFormat: string, reference: Date, linkDa
     if (parts.some(part => text.slice(part.index, (part.index ?? 0) + part[0].length) !== part[0])) continue;
     const expression = parts.map(part => part[0]).join(" ");
     const previousWord = /(\S+)\s*$/.exec(prose.slice(0, from))?.[1] ?? "";
-    // Never split an unrecognized `>…` token into prose and a date.
-    if (previousWord.startsWith(">")) continue;
     if (!acceptsExpression(expression, previousWord, dateFormat)) continue;
     const insert = replacement(expression);
     if (insert === undefined) continue;
@@ -121,7 +111,6 @@ function readNoteDates(text: string, dateFormat: string, reference: Date, linkDa
     break;
   }
   if (deadline) changes.push(deadline);
-  if (defer) changes.push(defer);
   return { changes: changes.filter(change => text.slice(change.from, change.to) !== change.insert).sort((a, b) => a.from - b.from), words };
 }
 

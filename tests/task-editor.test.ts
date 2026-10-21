@@ -230,20 +230,12 @@ it("opens the property's popover for a property shortcut, the title keeping the 
   expect(click).toHaveBeenCalledOnce();
 });
 
-it("shows only the title of a task with a defer, and keeps the defer", () => {
-  const { fields } = openModal(true, "defer", "- [ ] Existing >2026-10-01 p2");
-  expect(fields.rawInput.value).toBe("Existing");
-  const callback = vi.mocked(window.setTimeout).mock.calls.at(-1)![0] as () => void;
-  callback();
-  expect(fields.rawInput.setSelectionRange).toHaveBeenCalledWith(0, 0);
-});
-
-it.each(["- [ ] Existing >2026-10-01", "- [ ] Existing >someday"])("keeps a defer when saving unchanged: %s", async raw => {
-  const { key, onSave } = openModal(true, undefined, raw);
+it.each([["- [ ] Existing >2026-10-01 p2", "Existing >2026-10-01"], ["- [ ] Existing >someday", "Existing >someday"]])("reads a `>` word as title text and keeps it when saving unchanged: %s", async (raw, title) => {
+  const { fields, key, onSave } = openModal(true, undefined, raw);
+  expect(fields.rawInput.value).toBe(title);
   key({ metaKey: true });
   await vi.waitFor(() => expect(onSave).toHaveBeenCalledOnce());
-  const draft = onSave.mock.calls[0][0];
-  expect(raw.endsWith("someday") ? draft.someday : draft.deferDate).toBe(raw.endsWith("someday") ? true : "2026-10-01");
+  expect(onSave.mock.calls[0][0]).toMatchObject({ title });
 });
 
 it("saves an unchanged task without changing its metadata", async () => {

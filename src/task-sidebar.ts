@@ -687,7 +687,7 @@ export class TaskSidebarView extends ItemView {
     this.listDrag?.row(row, primary, task);
     const host = this.host() ?? this.note;
     const details = {
-      grouping: "none" as const, dateFormat: this.plugin.dateFormat(), show: (property: string) => property !== "defer", source: task.path, tags: task.tags ?? [],
+      grouping: "none" as const, dateFormat: this.plugin.dateFormat(), source: task.path, tags: task.tags ?? [],
       edit: (property: TaskEditorProperty) => { if (host) void this.edit(host, [task], property); },
       openSource: () => void this.openSource(task)
     };
@@ -1048,10 +1048,6 @@ export class TaskSidebarView extends ItemView {
     // Without a name beside them, the Things style's lines say what they are, as a card's do.
     row("repeat", "Repeat", "repeat", item => item.repeat, value => {
       if (task.repeat) value.setText(things ? `Repeats ${repeatLabel(task.repeat).toLowerCase()}` : repeatLabel(task.repeat));
-    });
-    row("eye-off", "Hidden until", "defer", item => [item.someday, item.deferDate], value => {
-      const date = task.someday ? "Someday" : task.deferDate ? longDate(task.deferDate, now) : "";
-      value.setText(things && task.deferDate && !task.someday ? `Hidden until ${date}` : date);
     });
     return properties;
   }

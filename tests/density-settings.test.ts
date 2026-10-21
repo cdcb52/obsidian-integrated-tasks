@@ -86,3 +86,18 @@ it("records completion dates unless turned off", async () => {
     expect(plugin.settings.completionDates).toBe(expected);
   }
 });
+
+it("drops what saved lists and views say about a property that no longer exists", async () => {
+  const gone = { property: "hidden", operator: "has", values: [] };
+  const kept = { property: "priority", operator: "is", values: ["1"] };
+  const plugin = new TaskManagerPlugin({} as App, {} as never);
+  plugin.loadData = vi.fn().mockResolvedValue({
+    smartLists: [{ id: "a", name: "A", filters: [gone, kept], sort: "hidden", descending: false, grouping: "hidden" }],
+    viewOptions: { today: { filters: [gone], sort: "deadline", descending: true, grouping: "priority" }, upcoming: { filters: [], sort: "date", descending: false, grouping: "none" } }
+  });
+  await plugin.loadSettings();
+  expect(plugin.settings.smartLists[0]).toMatchObject({ filters: [kept], sort: "date", grouping: "default" });
+  expect(plugin.settings.viewOptions).toEqual({
+    today: { filters: [], sort: "deadline", descending: true, grouping: "priority" }, upcoming: { filters: [], sort: "date", descending: false, grouping: "none" }
+  });
+});

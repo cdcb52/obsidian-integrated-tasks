@@ -43,7 +43,7 @@ describe("task query parsing", () => {
   it("turns property lines into filters, resolving relative dates when rendered", () => {
     const { query, errors } = parse([
       "deadline: before next friday", "scheduled: between today and in 7 days", "priority: 1, 2", "tags: #work or [[home]]",
-      "status: open", "duration: is not 1h30m", "hidden until: someday", "note: this", "source: Inbox", "task title: contains report", "repeat: has"
+      "status: open", "duration: is not 1h30m", "note: this", "source: Inbox", "task title: contains report", "repeat: has"
     ].join("\n"));
     expect(errors).toEqual([]);
     expect(query.filters).toEqual([
@@ -53,7 +53,6 @@ describe("task query parsing", () => {
       { property: "tags", operator: "is", values: ["work", "home"] },
       { property: "status", operator: "is", values: ["Open"] },
       { property: "duration", operator: "isNot", values: ["90"] },
-      { property: "defer", operator: "is", values: ["Someday"] },
       { property: "source", operator: "is", values: ["Daily/2026-09-27.md"] },
       { property: "source", operator: "is", values: ["Inbox.md"] },
       { property: "title", operator: "contains", values: ["report"] },

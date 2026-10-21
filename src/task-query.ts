@@ -43,7 +43,7 @@ export const DEFAULT_QUERY_LIMIT = 50;
 const VIEWS = ["today", "upcoming", "inbox", "all", "overdue"] as const;
 const ALIASES: Record<string, TaskProperty> = {
   scheduled: "scheduledDate", "scheduled date": "scheduledDate", "scheduled time": "scheduledTime", due: "deadline", "due date": "deadline",
-  "deadline time": "deadlineTime", tag: "tags", note: "source", source: "source", "hidden until": "defer", snoozed: "defer", defer: "defer",
+  "deadline time": "deadlineTime", tag: "tags", note: "source", source: "source",
   done: "completed", "completed date": "completed", "done date": "completed", heading: "section", "task title": "title"
 };
 const CALENDAR_SCOPES: Record<string, CalendarScope> = { day: "day", "4 days": "four-day", "four days": "four-day", week: "week", month: "month" };
@@ -85,7 +85,6 @@ function condition(property: typeof TASK_PROPERTIES[number], text: string, conte
   for (const raw of values) {
     const item = raw.replace(/^#\[\[|^\[\[|\]\]$/g, "").replace(/^#/, "").trim();
     if (property.kind === "date") {
-      if (property.key === "defer" && /^someday$/i.test(item)) { converted.push("Someday"); continue; }
       const date = parseDateExpression(item, context.now, context.dateFormat);
       if (!date) return `"${raw}" isn't a date I understand. Try a date such as ${todayIso(context.now)}, today, or next friday.`;
       converted.push(date);

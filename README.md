@@ -46,7 +46,6 @@ Every checklist item in your vault is a task. Its properties go at the end of th
 | `p1`, `p2`, `p3` | Priority: high, medium, low |
 | `#writing` | Tag |
 | `every week` | Repeat (see [Repeat tasks and keep routines](#repeat-tasks-and-keep-routines)) |
-| `>2026-11-01` or `>someday` | Hidden until that day, or set aside with no date (see [Snooze](#snooze-tasks-you-cant-act-on-yet)) |
 | `✓2026-08-20` | The day it was completed |
 
 The character in the checkbox is the task's status:
@@ -214,7 +213,7 @@ Write one option per line:
 | `smart list` | `Quick wins` (uses that list's filters, sort and grouping) |
 | `project` | `[[Website Refresh]]`, or `this` for the note the block is in |
 | `note` | `this`, `[[Inbox]]` (tasks written in that note) |
-| Any property | `priority: 1, 2` · `tags: work or home` · `status: in progress, waiting` · `repeat: has` · `hidden until: someday` · `task title: contains report` |
+| Any property | `priority: 1, 2` · `tags: work or home` · `status: in progress, waiting` · `repeat: has` · `task title: contains report` |
 | Dates | `deadline: before next friday` · `scheduled: between today and in 7 days` · `completed: after 7 days ago` · `deadline: missing` |
 | `search` | words in the title, notes or tags |
 | `sort`, `group` | `sort: priority desc` · `group: source` |
@@ -229,11 +228,11 @@ Dates such as `today` or `next friday` are worked out each time the list is show
 
 Click a task to select it, Shift-click to select a range, and Cmd/Ctrl-click to add to the selection (Cmd/Ctrl+A selects the whole view). Then right-click, or press a key, to change every selected task at once:
 
-![The task menu open on a selected task, with Complete, Date, Priority, Project, Deadline, Tags, Repeat, Snooze, Status, Duplicate and Delete, each with its shortcut key](resources/images/task-menu.png)
+![The task menu open on a selected task, with Complete, Date, Priority, Project, Deadline, Tags, Repeat, Status, Duplicate and Delete, each with its shortcut key](resources/images/task-menu.png)
 
 - **Complete** or **Reopen**
 - **Date**: Today, Tomorrow, Next week, or any date, time and duration
-- **Priority**, **Project**, **Deadline**, **Tags**, **Repeat**, **Snooze** and **Status**
+- **Priority**, **Project**, **Deadline**, **Tags**, **Repeat** and **Status**
 - **Duplicate** (with notes and subtasks) and **Delete**
 
 You can also drag a selection to move it, or drop it on the calendar to reschedule it.
@@ -266,7 +265,6 @@ With tasks selected:
 | G | Project |
 | R | Repeat |
 | S | Status (press again to cycle) |
-| Shift + S | Snooze |
 | C | Complete, or reopen |
 | Cmd/Ctrl + C / V | Copy as Markdown / Paste |
 | Cmd/Ctrl + D | Duplicate |
@@ -283,13 +281,9 @@ For a habit you want a history of, make a routine note:
 
 Each time you check the task off (or cancel it), it moves to its next date and the routine note records the day: `COMPLETED: 2026-09-19` or `CANCELED: 2026-09-26`.
 
-## Snooze tasks you can't act on yet
-
-End a task with `>` and a date, such as `>2026-11-01`, to hide it from Inbox, Today and Upcoming until that day. Use `>someday` to set it aside with no date. Snoozed tasks still appear in All Tasks, projects and tags, labelled **Hidden until**. In a task view, press **Shift+S** on selected tasks to snooze them.
-
 ## Undo and redo
 
-Press **Cmd/Ctrl+Z** in a task view, or run **Undo last task change**, to undo a change made from a task view: completing, moving, editing, snoozing or deleting tasks. The last 20 changes can be undone, and **Cmd/Ctrl+Shift+Z** redoes them. Undo only runs if the notes involved haven't changed since; otherwise it tells you which note changed. Turn on **Show undo notices** for a notice with an **Undo** button after each change.
+Press **Cmd/Ctrl+Z** in a task view, or run **Undo last task change**, to undo a change made from a task view: completing, moving, editing or deleting tasks. The last 20 changes can be undone, and **Cmd/Ctrl+Shift+Z** redoes them. Undo only runs if the notes involved haven't changed since; otherwise it tells you which note changed. Turn on **Show undo notices** for a notice with an **Undo** button after each change.
 
 ## Use it on your phone
 
@@ -327,14 +321,13 @@ Run **Import tasks from the Tasks plugin**, or choose **Import…** in settings,
 | --- | --- |
 | 📅 due date | `{deadline}` |
 | ⏳ scheduled date | scheduled date |
-| 🛫 start date | `>` hidden until |
 | ✅ done date | `✓` completion date |
 | 🔁 every week | `every week` |
 | 🔺 ⏫ / 🔼 / 🔽 ⏬ | `p1` / `p2` / `p3` |
 | `#tag` | a tag at the end of the task, if you choose to convert tags |
 | `[/]`, `[?]`, `[-]` | kept, as in progress, waiting and cancelled |
 
-Dataview-style fields such as `[due:: 2026-10-01]` are converted too, and your Tasks global filter is removed. You see how many tasks will change, with examples, before anything is written, and the whole import is one change you can undo. Anything it can't convert, such as dependencies, is listed in the preview and left as it is. Tasks query blocks are not touched.
+Dataview-style fields such as `[due:: 2026-10-01]` are converted too, and your Tasks global filter is removed. You see how many tasks will change, with examples, before anything is written, and the whole import is one change you can undo. Anything it can't convert, such as start dates and dependencies, is listed in the preview and left as it is. Tasks query blocks are not touched.
 
 ## Manual installation
 

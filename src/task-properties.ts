@@ -4,7 +4,7 @@ import { STATUS_LABELS, statusFromLabel } from "./task-status";
 import { todayIso } from "./date";
 import type { FilterOperator, Task, TaskFilter, TaskProperty } from "./types";
 
-const DATE_PROPERTIES = new Set<TaskProperty>(["scheduledDate", "deadline", "defer", "completed"]);
+const DATE_PROPERTIES = new Set<TaskProperty>(["scheduledDate", "deadline", "completed"]);
 
 /**
  * Date filter values may be relative — `today`, `today+7`, `today-1` — so a saved smart list such as
@@ -25,7 +25,6 @@ export const TASK_PROPERTIES: { key: TaskProperty; label: string; kind: "text" |
   { key: "duration", label: "Duration", kind: "number" },
   { key: "deadline", label: "Deadline", kind: "date" },
   { key: "deadlineTime", label: "Deadline time", kind: "time" },
-  { key: "defer", label: "Hidden until", kind: "date" },
   { key: "repeat", label: "Repeat", kind: "text" },
   { key: "completed", label: "Completed date", kind: "date" },
   { key: "priority", label: "Priority", kind: "choice" },
@@ -39,7 +38,6 @@ export function propertyValue(task: Task, property: TaskProperty): string | numb
   if (property === "status") return STATUS_LABELS[task.status];
   if (property === "source") return task.path;
   if (property === "duration") return task.durationMinutes;
-  if (property === "defer") return task.someday ? "Someday" : task.deferDate;
   if (property === "completed") return task.completedDate;
   return task[property];
 }

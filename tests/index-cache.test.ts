@@ -15,8 +15,8 @@ const RICH = [
   "    continuation",
   "  - [ ] Child {2026-10-05}",
   "    - [x] Grandchild ✓2026-09-01",
-  "- [ ] Deferred >2026-09-30",
-  "- [ ] Someday >someday",
+  "- [ ] Later {2026-09-30}",
+  "- [ ] Someday",
   "- [ ] Repeat [[2026-10-02]] every week",
   "## Sub",
   "# Home",
@@ -85,8 +85,7 @@ describe("persisted task index", () => {
     const byTitle = new Map(tasks.map(task => [task.title, task]));
     expect(byTitle.get("Parent")).toMatchObject({ scheduledDate: "2026-10-01", scheduledTime: "09:00", priority: 1, tags: ["work"], description: "- details line\n- more\n  continuation", descriptionLines: [2, 3, 4], childIds: ["A.md:5"], endLine: 6, section: "Work", sectionLine: 0 });
     expect(byTitle.get("Grandchild")).toMatchObject({ completed: true, completedDate: "2026-09-01", parentId: "A.md:5" });
-    expect(byTitle.get("Deferred")?.deferDate).toBe("2026-09-30");
-    expect(byTitle.get("Someday")?.someday).toBe(true);
+    expect(byTitle.get("Later")?.deadline).toBe("2026-09-30");
     expect(byTitle.get("Repeat")?.repeat).toBe("every week");
     expect(warm.taskById("A.md:5")?.deadline).toBe("2026-10-05");
     await shutdown(warm);
@@ -160,8 +159,8 @@ describe("persisted task index", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(2026, 8, 27, 10));
     const w = world({
-      "R.md": "- [ ] Call {tomorrow}", "D.md": "- [ ] Later >fri", "S.md": "- [ ] Strict {2026-10-05} [[2026-10-01]]",
-      "W.md": "- [ ] Renew {in two weeks}", "Y.md": "- [ ] File {oct 30} #[[tax 2026]]", "T.md": "- [ ] Ship {2026-10-05 6pm} >someday"
+      "R.md": "- [ ] Call {tomorrow}", "D.md": "- [ ] Later {fri}", "S.md": "- [ ] Strict {2026-10-05} [[2026-10-01]]",
+      "W.md": "- [ ] Renew {in two weeks}", "Y.md": "- [ ] File {oct 30} #[[tax 2026]]", "T.md": "- [ ] Ship {2026-10-05 6pm}"
     });
     const cache = new MemoryIndexCache();
     await shutdown(await boot(w, cache));

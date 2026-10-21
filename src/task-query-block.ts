@@ -13,7 +13,7 @@ import { createTaskRow, dropEmptyRowParts } from "./task-row";
 import { renderThingsTaskDetails } from "./things-row-details";
 import { renderThingsBoardCard } from "./things-task-card";
 import { STATUS_LABELS } from "./task-status";
-import type { Task, TaskGrouping, TaskProperty } from "./types";
+import type { Task, TaskGrouping } from "./types";
 
 type QueryHost = Pick<TaskManagerPlugin, "app" | "index" | "store" | "settings" | "dateFormat" | "openEditor" | "openTask" | "startTask" | "openTaskView" | "openTag">;
 
@@ -218,7 +218,7 @@ export class TaskQueryBlock extends MarkdownRenderChild {
       if (!things && recurringFile(app, task)) setIcon(primary.createSpan({ cls: "tm-task-recurring", attr: { role: "img", "aria-label": "Recurring task", title: "Recurring task" } }), "repeat-2");
     } catch { /* Ambiguous recurring links remain editable through the task editor. */ }
     const details: TaskDetailsOptions & { tags: string[]; openSource: () => void } = {
-      grouping: grouping === "default" ? "none" : grouping, dateFormat: this.plugin.dateFormat(), show: (property: TaskProperty) => property !== "defer",
+      grouping: grouping === "default" ? "none" : grouping, dateFormat: this.plugin.dateFormat(),
       source: task.path !== this.sourcePath ? task.path : undefined, tags: task.tags ?? [],
       edit: (property: TaskEditorProperty) => this.plugin.openTask(task, property),
       openSource: () => {

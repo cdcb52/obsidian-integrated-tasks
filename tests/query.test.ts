@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { groupTasks, orderTaskTree, sortTasks, taskMatchesQuery } from "../src/query";
+import { scanTasks } from "../src/parser";
 import type { Task } from "../src/types";
 
 const now = new Date(2026, 8, 4, 12, 0, 0);
@@ -49,6 +50,12 @@ describe("task queries", () => {
     const inboxTask = task({ path: "Inbox.md" });
     expect(taskMatchesQuery(inboxTask, { mode: "inbox", showCompleted: false }, "Inbox.md", now)).toBe(true);
     expect(taskMatchesQuery(inboxTask, { mode: "project", projectPath: "Project.md", showCompleted: false }, "Inbox.md", now)).toBe(false);
+  });
+
+  it("lists a task with a `>` word in its title in Inbox like any other", () => {
+    const [idea] = scanTasks("Inbox.md", "- [ ] Idea >someday", now);
+    expect(idea.title).toBe("Idea >someday");
+    expect(taskMatchesQuery(idea, { mode: "inbox", showCompleted: false }, "Inbox.md", now)).toBe(true);
   });
 
   it("hides completed tasks unless requested", () => {

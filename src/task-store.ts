@@ -552,7 +552,6 @@ function dropLabel(tasks: Task[], group?: ListDropGroup, anchor?: Task): string 
   const name = tasksName(tasks);
   if (anchor) return `Moved ${name}`;
   switch (group?.property) {
-    case "defer": return group.value === "Someday" ? `Snoozed ${name} to someday` : group.value ? `Snoozed ${name}` : `Stopped snoozing ${name}`;
     case "date": case "scheduledDate": case "deadline": case "scheduledTime": case "deadlineTime": return `Rescheduled ${name}`;
     case "status": {
       if (group.value === "Open") return `Reopened ${name}`;

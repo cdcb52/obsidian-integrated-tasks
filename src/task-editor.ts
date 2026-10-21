@@ -16,7 +16,7 @@ import { taskTimeDurationLabel, taskTimeLabel } from "./task-row-details";
 import { STATUS_ICONS, STATUS_LABELS, TASK_STATUSES, draftStatus, isClosedStatus, statusClass, statusFromChar } from "./task-status";
 import type { Project, Task, TaskDraft, TaskManagerSettings, TaskStatus, TaskViewMode } from "./types";
 
-export type TaskEditorProperty = "scheduledDate" | "deadline" | "defer" | "durationMinutes" | "priority" | "tags" | "repeat";
+export type TaskEditorProperty = "scheduledDate" | "deadline" | "durationMinutes" | "priority" | "tags" | "repeat";
 
 export interface TaskEditorOptions {
   focusProperty?: TaskEditorProperty;
