@@ -591,7 +591,7 @@ it("lays board cards out like an open task card in the Things style", async () =
 });
 
 it("lists a subtask on its own row only with Show subtasks on, or when its task is not in the view", async () => {
-  const { view, content, plugin } = await setup([["A.md", `- [ ] Parent 2026-10-20\n  - [ ] Child ${todayIso()}\n- [ ] Other`]]);
+  const { view, content, plugin } = await setup([["A.md", `- [ ] Parent 2099-10-20\n  - [ ] Child ${todayIso()}\n- [ ] Other`]]);
   plugin.settings.style = "things";
   const titles = () => Array.from(content().querySelectorAll<HTMLElement>(".tm-task-row .tm-task-title")).map(title => title.textContent);
   await view.setState({ mode: "all" });
