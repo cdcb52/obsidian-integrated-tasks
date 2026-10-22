@@ -119,7 +119,7 @@ export function describeWhen(value: DatePopoverValue): string {
 
 /**
  * A Things-like date picker: one natural-language input for the date, time and duration
- * ("next fri 3pm 30m"), No date, and a month calendar.
+ * ("next fri 3pm 30m"), Reset, and a month calendar.
  * Picking a date saves and closes; Enter in the input, or a click outside, saves what was typed.
  * Escape closes without saving. Only one popover is open at a time.
  */
@@ -158,14 +158,16 @@ export function openDatePopover(options: DatePopoverOptions): DatePopover {
     button.createSpan({ text: label });
     button.addEventListener("click", pick);
   };
-  const pickDate = (date: string | undefined): void => {
+  const pickDate = (date: string): void => {
     pending.date = date;
-    // A time belongs to a date: no date, no time.
-    if (!date) pending.time = undefined;
     close(true, false);
   };
   divider();
-  choice("calendar-x", "No date", () => pickDate(undefined));
+  // Reset clears all the popover sets: the date, its time and (for a schedule) the duration.
+  choice("rotate-ccw", "Reset", () => {
+    pending.date = pending.time = pending.duration = undefined;
+    close(true, false);
+  });
   divider();
 
   // The month calendar: today in the accent colour, the chosen date in a circle.

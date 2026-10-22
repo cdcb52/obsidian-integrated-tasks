@@ -66,10 +66,10 @@ describe("reading the one input", () => {
 });
 
 describe("date popover", () => {
-  it("has one input, No date and a calendar, and shows the current value under the input", () => {
+  it("has one input, Reset and a calendar, and shows the current value under the input", () => {
     const { handle, input, hint } = popover({ value: { date: "2026-09-28", time: "09:45", duration: 30 } });
     expect(handle.element.querySelectorAll("input")).toHaveLength(1);
-    expect(Array.from(handle.element.querySelectorAll(".tm-date-popover-choice")).map(row => row.textContent)).toEqual(["No date"]);
+    expect(Array.from(handle.element.querySelectorAll(".tm-date-popover-choice")).map(row => row.textContent)).toEqual(["Reset"]);
     expect(hint()).toBe("Mon, Sep 28, 2026, 9:45 AM · 30m");
     expect(handle.element.querySelector(".is-selected")!.getAttribute("data-date")).toBe("2026-09-28");
     expect(handle.element.querySelector(".is-today")!.getAttribute("data-date")).toBe("2026-09-29");
@@ -77,14 +77,25 @@ describe("date popover", () => {
     expect(document.activeElement).toBe(input);
   });
 
-  it("saves and closes on a picked day or No date", () => {
+  it("saves and closes on a picked day or Reset", () => {
     const first = popover();
     first.handle.element.querySelector<HTMLElement>('[data-date="2026-10-08"]')!.click();
     expect(first.save).toHaveBeenCalledExactlyOnceWith({ date: "2026-10-08" });
     expect(first.handle.element.isConnected).toBe(false);
-    const second = popover({ value: { date: "2026-10-08", time: "09:00" } });
-    second.find("No date").click();
-    expect(second.save).toHaveBeenCalledExactlyOnceWith({ date: undefined, time: undefined });
+    // Reset clears a schedule's date, time and duration.
+    const second = popover({ value: { date: "2026-10-08", time: "09:00", duration: 30 } });
+    second.find("Reset").click();
+    expect(second.save).toHaveBeenCalledOnce();
+    expect(Object.entries(second.save.mock.calls[0][0]).filter(([, value]) => value !== undefined)).toEqual([]);
+    expect(second.handle.element.isConnected).toBe(false);
+    // A deadline's date and time.
+    const third = popover({ kind: "deadline", value: { date: "2026-10-08", time: "17:00" } });
+    third.find("Reset").click();
+    expect(Object.entries(third.save.mock.calls[0][0]).filter(([, value]) => value !== undefined)).toEqual([]);
+    // Nothing set, nothing saved.
+    const fourth = popover({ value: {} });
+    fourth.find("Reset").click();
+    expect(fourth.save).not.toHaveBeenCalled();
   });
 
   it("previews what is typed, keeps text it does not understand, and saves on Enter", () => {
