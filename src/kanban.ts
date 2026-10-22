@@ -1,9 +1,11 @@
 import { groupTasks } from "./query";
 import { taskGroupTarget, type ListDropGroup } from "./list-drag";
 import { STATUS_LABELS, TASK_STATUSES } from "./task-status";
+import type { NoteHeading } from "./structure";
 import type { Task, TaskGrouping } from "./types";
 
-export interface KanbanColumn { title: string; tasks: Task[]; target?: ListDropGroup; alert?: boolean }
+/** `heading`: a note's heading the column is, which drags to reorder the note's sections. */
+export interface KanbanColumn { title: string; tasks: Task[]; target?: ListDropGroup; alert?: boolean; heading?: NoteHeading }
 export function kanbanColumns(tasks: Task[], grouping: TaskGrouping): KanbanColumn[] {
   if (grouping === "none") return [{ title: "Tasks", tasks }];
   const property = grouping === "default" ? "section" : grouping;

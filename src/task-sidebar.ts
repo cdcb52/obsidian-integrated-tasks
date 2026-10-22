@@ -190,9 +190,14 @@ export class TaskSidebarView extends ItemView {
     return view instanceof TaskMainView ? view : undefined;
   }
 
-  /** What the details edit through: the task view in front, else beside a note (or with a new task started there), the note's. */
+  /**
+   * What the details edit through: the task view in front, else beside a note (or with a new task started there), the
+   * note's. The Projects view lists projects, so a new task started over it (Create new task) is the note's too.
+   */
   private host(): DetailsHost | undefined {
-    return this.taskView() ?? (this.note.noteView() || this.note.newTaskInSidebar() ? this.note : undefined);
+    const view = this.taskView();
+    if (view && !(view.isProjectsView && this.note.newTaskInSidebar())) return view;
+    return this.note.noteView() || this.note.newTaskInSidebar() ? this.note : undefined;
   }
 
   /** `force`: redraw both parts, even unchanged. */
@@ -366,6 +371,16 @@ export class TaskSidebarView extends ItemView {
       version: 0, error: "", creating: false
     };
     this.render();
+    this.content.querySelector<HTMLTextAreaElement>(".tm-sidebar-title-field")?.focus();
+  }
+
+  /**
+   * After a new task is written, the next one: drawn afresh (it reads as the last did, so would not redraw), its title
+   * focused.
+   */
+  private focusNewTask(): void {
+    if (this.closed || !this.host()?.newTaskInSidebar()) return;
+    this.render(true);
     this.content.querySelector<HTMLTextAreaElement>(".tm-sidebar-title-field")?.focus();
   }
 
@@ -988,8 +1003,8 @@ export class TaskSidebarView extends ItemView {
     });
     notes.addEventListener("input", () => { autosize(notes); change(); });
     // Enter in the title or notes confirms what was typed (Shift+Enter goes on from the title to the notes, and starts a
-    // line in them): it is saved as the field is left, and a new task is written once titled. Escape (see closeDetails)
-    // cancels it and closes the task.
+    // line in them): it is saved as the field is left, and a new task is written once titled, the next new task taking
+    // its place. Escape (see closeDetails) cancels it and closes the task.
     panel.addEventListener("keydown", event => {
       const target = event.target as HTMLElement;
       if (target !== title && target !== notes) return;
@@ -1000,7 +1015,7 @@ export class TaskSidebarView extends ItemView {
       } else if (event.key === "Enter" && !event.isComposing && (!event.shiftKey || event.metaKey || event.ctrlKey)) {
         event.preventDefault();
         if (!isNew) target.blur();
-        else if (title.value.trim()) void host.finishNewTask();
+        else if (title.value.trim()) void host.finishNewTask(true, true).then(() => this.focusNewTask());
       }
     });
     const fit = (): void => { autosize(title); autosize(notes); };

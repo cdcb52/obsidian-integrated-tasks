@@ -8,12 +8,12 @@ import { isRepeatingTask, recurringFile, type RecurringOutcome } from "./recurri
 import { shiftCalendar, type CalendarScope } from "./calendar";
 import { scanTasks } from "./parser";
 import { applyProjectDraft, projectEditDraft } from "./project-editor";
-import { cloneTaskFilters, forgetUnknownProperties } from "./task-filters";
-import { SmartListEditorModal, type SmartListDraft } from "./smart-list-editor";
+import { cloneTaskFilters, forgetUnknownProperties, type SmartListDraft } from "./task-filters";
 import { ProjectCreatorModal, projectFolderPath, projectNotePath, projectNoteContent, type ProjectDraft } from "./project-creator";
 import { setTagFormat as useTagFormat, type TagFormat } from "./task-tags";
 import { convertTagFormat } from "./tag-links";
 import { completedSectionName, setCodeBlockTasks } from "./structure";
+import { addSection, moveSection, type HeadingRef } from "./note-headings";
 import { openConfirm } from "./confirm-modal";
 import { TaskModeController } from "./task-mode";
 import type { TaskEditorPreset } from "./types";
@@ -146,11 +146,11 @@ export default class TaskManagerPlugin extends Plugin {
       } });
     }
     this.addCommand({ id: "open-task-sidebar", name: "Open task details sidebar", callback: () => void this.activateTaskSidebar().catch((error) => new Notice(String(error))) });
-    this.addCommand({ id: "create-new-smart-list", name: "Create new smart list", callback: () => this.openSmartListEditor() });
-    this.addCommand({ id: "edit-smart-list", name: "Edit smart list", checkCallback: checking => {
-      const list = this.activeSmartList();
-      if (!list) return false;
-      if (!checking) this.openSmartListEditor(list);
+    // Smart lists are made from a view's View options (Convert to smart list), and renamed, updated or deleted from their actions.
+    this.addCommand({ id: "edit-smart-list", name: "Open smart list actions", checkCallback: checking => {
+      const view = this.app.workspace.getActiveViewOfType(TaskMainView);
+      if (!view || !this.activeSmartList()) return false;
+      if (!checking) view.openSmartListActions();
       return true;
     } });
     this.addCommand({ id: "delete-smart-list", name: "Delete smart list", checkCallback: checking => {
@@ -170,6 +170,12 @@ export default class TaskManagerPlugin extends Plugin {
     this.addCommand({ id: "edit-task-properties", name: "Open task menu", checkCallback: checking => this.editSelectedTaskProperties(checking) });
     this.addCommand({ id: "new-task", name: "Create new task", callback: () => this.newTask() });
     this.addCommand({ id: "new-project", name: "Create new project", callback: () => this.openProjectCreator() });
+    this.addCommand({ id: "add-heading", name: "Add new heading", checkCallback: checking => {
+      const view = this.app.workspace.getActiveViewOfType(TaskMainView);
+      if (!view?.headingNote) return false;
+      if (!checking) view.addHeading();
+      return true;
+    } });
     this.addCommand({ id: "convert-task-tags", name: "Convert task tags to the tag format", callback: () => void this.convertTaskTags() });
     this.addCommand({ id: "insert-task-query", name: "Insert task query", editorCallback: editor => editor.replaceSelection(TASK_QUERY_TEMPLATE) });
     this.addCommand({ id: "import-tasks-plugin", name: "Import tasks from the Tasks plugin", callback: () => this.openTasksImport() });
@@ -501,13 +507,6 @@ export default class TaskManagerPlugin extends Plugin {
     return state?.mode === "smartLists" ? this.settings.smartLists.find(list => list.id === state.smartListId) : undefined;
   }
 
-  openSmartListEditor(list?: SmartList): void {
-    new SmartListEditorModal(this.app, this.index.allTasks(), async draft => {
-      const saved = await this.saveSmartList(draft, list?.id);
-      await this.openTaskView({ mode: "smartLists", smartListId: saved.id });
-    }, list).open();
-  }
-
   async saveSmartList(draft: SmartListDraft, id?: string): Promise<SmartList> {
     const name = draft.name.trim();
     if (!name) throw new Error("Enter a list name.");
@@ -609,6 +608,28 @@ export default class TaskManagerPlugin extends Plugin {
     return path;
   }
 
+
+  /**
+   * Adds a heading at the end of a note, at the section heading level (above its completed tasks section, which stays
+   * last), as one undoable change.
+   */
+  async addHeading(path: string, name: string): Promise<void> {
+    const title = name.trim();
+    if (!title || /[\r\n]/.test(title)) throw new Error("Enter a heading name.");
+    if (this.index.headingsForPath(path).some(heading => heading.name === title)) throw new Error("This note already has a heading with this name.");
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) throw new Error("The note no longer exists.");
+    await this.store.rewriteNotes([file], content => addSection(content, title, this.settings.sectionHeadingLevel, completedSectionName(this.settings.completedSection)), `Added heading “${title}”`);
+    await this.index.refreshPath(path);
+  }
+
+  /** Moves a heading's section (its tasks and text) before another's, or after the last, as one undoable change. */
+  async moveHeading(path: string, heading: HeadingRef, before?: HeadingRef): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) throw new Error("The note no longer exists.");
+    await this.store.rewriteNotes([file], content => moveSection(content, this.settings.sectionHeadingLevel, heading, before), `Moved heading “${heading.name}”`);
+    await this.index.refreshPath(path);
+  }
 
   /** A project's current properties, as read from its note. */
   projectDraft(project: Project): ProjectDraft {

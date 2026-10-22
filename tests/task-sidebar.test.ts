@@ -82,7 +82,8 @@ async function setup(notes: Array<[string, string]>) {
     showInTaskSidebar: vi.fn(async (id: string, options?: { focus?: boolean }) => sidebar.showTask(id, options)),
     newTaskDraft: () => ({ title: "", completed: false, indent: 0, destination: "A.md" }), projectDraft: () => ({ tags: "" }),
     // As the plugin does, a name it cannot use is refused before anything is written.
-    createProjectNote: vi.fn(async (draft: ProjectDraft) => `Projects/${projectNotePath(draft.name)}`), openProject: vi.fn().mockResolvedValue(undefined)
+    createProjectNote: vi.fn(async (draft: ProjectDraft) => `Projects/${projectNotePath(draft.name)}`), openProject: vi.fn().mockResolvedValue(undefined),
+    addHeading: vi.fn().mockResolvedValue(undefined), moveHeading: vi.fn().mockResolvedValue(undefined)
   };
   const view = new TaskMainView({ app } as unknown as WorkspaceLeaf, plugin as unknown as TaskManagerPlugin);
   const sidebar = new TaskSidebarView({ app } as unknown as WorkspaceLeaf, plugin as unknown as TaskManagerPlugin);
@@ -715,7 +716,7 @@ describe("three panes (Task details › Three panes: in the sidebar)", () => {
     expect(store.create).not.toHaveBeenCalled();
     expect(side().querySelector(".tm-sidebar-empty h3")!.textContent).toBe("No task selected");
 
-    // What is set before it is written goes with it; Enter writes it, and it stays shown, now selected.
+    // What is set before it is written goes with it; Enter writes it, and the next new task takes its place.
     view.newTask();
     await vi.waitFor(() => expect(title()?.placeholder).toBe("New to-do"));
     type("Buy milk");
@@ -727,13 +728,14 @@ describe("three panes (Task details › Three panes: in the sidebar)", () => {
     expect(title().value).toBe("Buy milk");
     key("Enter");
     await vi.waitFor(() => expect(contents.get("A.md")).toBe("- [ ] Buy milk p1\n- [ ] Existing"));
-    await vi.waitFor(() => expect(view.getSelectedTasks().map(task => task.title)).toEqual(["Buy milk"]));
-    expect(title().value).toBe("Buy milk");
-    expect(title().placeholder).toBe("Title");
+    await vi.waitFor(() => expect(title().value).toBe(""));
+    expect(title().placeholder).toBe("New to-do");
+    expect(document.activeElement).toBe(title());
+    // It starts afresh, without the last one's priority.
+    expect(side().querySelector(".tm-sidebar-property.is-p1")).toBeNull();
+    expect(view.getSelectedTasks()).toEqual([]);
 
     // Selecting another task writes one left titled; that task stays selected though its line moved.
-    view.newTask();
-    await vi.waitFor(() => expect(title()?.placeholder).toBe("New to-do"));
     type("Call Sam");
     rows(main()).find(row => row.textContent?.includes("Existing"))!.click();
     await vi.waitFor(() => expect(contents.get("A.md")).toBe("- [ ] Call Sam\n- [ ] Buy milk p1\n- [ ] Existing"));
@@ -892,7 +894,27 @@ describe("beside a note (no task view in front)", () => {
     title.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
     await vi.waitFor(() => expect(store.create).toHaveBeenCalledOnce());
     expect(contents.get("A.md")).toBe("- [ ] Call the venue\n- [ ] Existing");
-    await vi.waitFor(() => expect(side().querySelector<HTMLTextAreaElement>(".tm-sidebar-title-field")?.value).toBe("Call the venue"));
+    // The next new task takes its place; Escape drops it, and the caret's task shows again.
+    await vi.waitFor(() => expect(side().querySelector<HTMLTextAreaElement>(".tm-sidebar-title-field")?.value).toBe(""));
+    expect(document.activeElement).toBe(side().querySelector(".tm-sidebar-title-field"));
+    side().querySelector<HTMLTextAreaElement>(".tm-sidebar-title-field")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(side().querySelector<HTMLTextAreaElement>(".tm-sidebar-title-field")?.placeholder).toBe("Title"));
+    expect(store.create).toHaveBeenCalledOnce();
+  });
+
+  it("starts Create new task from the Projects view here, though that view lists projects", async () => {
+    const { view, sidebar, side, store, contents } = await setup([["A.md", "- [ ] Existing"]]);
+    await view.setState({ mode: "projects" });
+    await sidebar.startNewTask({ mode: "inbox" });
+    const title = side().querySelector<HTMLTextAreaElement>(".tm-sidebar-title-field")!;
+    expect(title.placeholder).toBe("New to-do");
+    expect(document.activeElement).toBe(title);
+    title.value = "Call the venue";
+    title.dispatchEvent(new Event("input"));
+    title.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(store.create).toHaveBeenCalledOnce());
+    expect(contents.get("A.md")).toBe("- [ ] Call the venue\n- [ ] Existing");
+    await vi.waitFor(() => expect(side().querySelector<HTMLTextAreaElement>(".tm-sidebar-title-field")?.value).toBe(""));
   });
 });
 
@@ -958,3 +980,83 @@ describe("a project created in the Task Details sidebar (three panes)", () => {
     expect(side().querySelector<HTMLTextAreaElement>(".tm-sidebar-title-field")!.value).toBe("Plan the offsite");
   });
 });
+
+describe("a note's headings in its task view", () => {
+  const note: [string, string] = ["Projects/P.md", "# A\n- [ ] a\n\n# B\n- [ ] b\n\n# C\n- [ ] c"];
+  const frame = () => new Promise(resolve => requestAnimationFrame(() => resolve(undefined)));
+  const pointer = (target: EventTarget, type: string, y: number) =>
+    target.dispatchEvent(new PointerEvent(type, { pointerId: 1, button: 0, clientX: 10, clientY: y, bubbles: true, cancelable: true }));
+
+  /** The page grouped by heading, laid out as happy-dom does not: each group 100px tall, its title the top 30px. */
+  async function page() {
+    const context = await setup([note]);
+    await context.view.setState({ mode: "all", pagePath: "Projects/P.md" });
+    const titles = () => Array.from(context.main().querySelectorAll<HTMLElement>(".tm-section > h2"));
+    titles().forEach((title, index) => {
+      title.getBoundingClientRect = () => new DOMRect(0, index * 100, 300, 30);
+      title.closest("section")!.getBoundingClientRect = () => new DOMRect(0, index * 100, 300, 90);
+    });
+    return { ...context, titles };
+  }
+
+  it("drag up and down to put the note's sections in another order", async () => {
+    const { main, plugin, titles } = await page();
+    expect(titles().map(title => title.textContent)).toEqual(["A", "B", "C"]);
+    const [a] = titles();
+    pointer(a, "pointerdown", 10);
+    pointer(document, "pointermove", 140);
+    await frame();
+    // Lifted: its group dims, and between B and C (past B's title) a line marks where it lands.
+    expect(a.closest("section")!.classList.contains("is-heading-dragging")).toBe(true);
+    expect(main().querySelector(".tm-heading-drag-preview")!.textContent).toBe("A");
+    const line = main().querySelector<HTMLElement>(".tm-heading-drop-line")!;
+    expect(line.hidden).toBe(false);
+    expect(line.style.top).toBe(`${(190 + 200) / 2 - 1.5}px`);
+    // Back over its own place, nothing would move.
+    pointer(document, "pointermove", 20);
+    await frame();
+    expect(line.hidden).toBe(true);
+    pointer(document, "pointermove", 250);
+    pointer(document, "pointerup", 250);
+    await vi.waitFor(() => expect(plugin.moveHeading).toHaveBeenCalledOnce());
+    expect(plugin.moveHeading).toHaveBeenCalledWith("Projects/P.md", expect.objectContaining({ name: "A", line: 0 }), undefined);
+    // The group moves at once, and the drag leaves nothing behind.
+    expect(Array.from(main().querySelectorAll(".tm-section > h2")).map(title => title.textContent)).toEqual(["B", "C", "A"]);
+    expect(main().querySelector(".tm-heading-drag-preview, .tm-heading-drop-line, .is-heading-dragging")).toBeNull();
+  });
+
+  it("drops before another heading, and Escape or a short press moves nothing", async () => {
+    const { plugin, titles } = await page();
+    const [, , c] = titles();
+    pointer(c, "pointerdown", 210);
+    pointer(document, "pointermove", 5);
+    pointer(document, "pointerup", 5);
+    await vi.waitFor(() => expect(plugin.moveHeading).toHaveBeenCalledOnce());
+    expect(plugin.moveHeading).toHaveBeenCalledWith("Projects/P.md", expect.objectContaining({ name: "C" }), expect.objectContaining({ name: "A" }));
+
+    const [first] = titles();
+    pointer(first, "pointerdown", 10);
+    pointer(document, "pointermove", 250);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    pointer(document, "pointerup", 250);
+    pointer(titles()[1], "pointerdown", 110);
+    pointer(document, "pointerup", 112);
+    await settle();
+    expect(plugin.moveHeading).toHaveBeenCalledOnce();
+  });
+
+  it("adds a heading from Add new heading, offered only while the view is grouped by heading", async () => {
+    const { view, plugin } = await page();
+    expect(view.headingNote).toBe("Projects/P.md");
+    view.addHeading();
+    const input = document.querySelector<HTMLInputElement>(".tm-choice-popover input")!;
+    input.value = "Launch";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(plugin.addHeading).toHaveBeenCalledExactlyOnceWith("Projects/P.md", "Launch"));
+
+    await view.setState({ mode: "all" });
+    expect(view.headingNote).toBeUndefined();
+  });
+});
+

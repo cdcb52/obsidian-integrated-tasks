@@ -22,6 +22,8 @@ const MAX_SELECTED_LINES = 2000;
 export class NoteTaskHost implements PropertyEditorHost {
   readonly editors = new TaskPropertyEditors(this);
   private pending?: PendingTask;
+  /** What the new task was started for, so the next one can start the same way. */
+  private pendingState?: OpenEditorState;
   /** The caret position the details were closed on (Escape): its tasks stay away until the caret moves. */
   private dismissed?: string;
 
@@ -151,6 +153,7 @@ export class NoteTaskHost implements PropertyEditorHost {
     const pending = await startPendingTask(this.plugin, this.plugin.newTaskDraft(state), this.app.vault);
     if (!pending) { this.plugin.openEditor(state); return; }
     this.pending = pending;
+    this.pendingState = state;
     this.changed();
   }
 
@@ -163,12 +166,17 @@ export class NoteTaskHost implements PropertyEditorHost {
     if (this.pending) Object.assign(this.pending, { title, notes });
   }
 
-  /** Enter writes the new task once titled, and the sidebar goes on showing it; Escape (`write` off) drops it. */
-  async finishNewTask(write = true): Promise<void> {
+  /**
+   * Enter writes the new task once titled and (`another`) starts the next one as this one was started, or else the
+   * sidebar goes on showing it; Escape (`write` off) drops it.
+   */
+  async finishNewTask(write = true, another = false): Promise<void> {
     const pending = this.pending;
+    const state = this.pendingState;
     this.pending = undefined;
     this.changed();
     const task = pending && write ? await writePendingTask(this.plugin, pending) : undefined;
-    if (task) this.written(task);
+    if (task && another && state) await this.startNewTask(state);
+    else if (task) this.written(task);
   }
 }

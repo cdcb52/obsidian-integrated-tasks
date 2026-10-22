@@ -7,7 +7,7 @@ vi.mock("obsidian", async importOriginal => ({
 vi.mock("../src/note-token-editor", () => ({ noteTokenEditor: vi.fn() }));
 import TaskManagerPlugin from "../src/main";
 import { TaskMainView } from "../src/task-view";
-import { smartListDraft, type SmartListDraft } from "../src/smart-list-editor";
+import { smartListDraft, type SmartListDraft } from "../src/task-filters";
 import { scanTasks } from "../src/parser";
 import { taskMatchesQuery, sortTasks, groupTasks } from "../src/query";
 const draft: SmartListDraft = { name: " Work queue ", filters: [{ property: "tags", operator: "is", values: ["work"], conditions: [{ join: "or", operator: "is", values: ["client"] }] }], sort: "priority", descending: false, grouping: "source" };

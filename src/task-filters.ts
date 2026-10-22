@@ -1,5 +1,5 @@
 import { TASK_PROPERTIES } from "./task-properties";
-import type { SmartList, SmartListScope, TaskFilter, TaskGrouping, TaskProperty, TaskSort } from "./types";
+import type { SmartList, TaskFilter, TaskGrouping, TaskProperty, TaskSort } from "./types";
 
 export function cloneTaskFilters(filters: readonly TaskFilter[]): TaskFilter[] {
   return filters.map(filter => ({
@@ -28,13 +28,6 @@ export function forgetUnknownProperties(options: { filters?: TaskFilter[]; sort?
   if (Array.isArray(options.filters)) options.filters = options.filters.filter(filter => known(filter?.property));
   if (typeof options.sort === "string" && options.sort !== "date" && !known(options.sort)) options.sort = "date";
   if (typeof options.grouping === "string" && !["default", "none", "date"].includes(options.grouping) && !known(options.grouping)) options.grouping = "default";
-}
-
-/** The view a smart list narrows, by name: "Today", a project's or a tag's. */
-export function smartListScopeLabel(scope: SmartListScope): string {
-  if (scope.mode === "project") return scope.path.replace(/\.md$/i, "").split("/").pop() ?? scope.path;
-  if (scope.mode === "tag") return scope.tag ?? scope.path?.replace(/\.md$/i, "").split("/").pop() ?? "Tag";
-  return { inbox: "Inbox", today: "Today", upcoming: "Upcoming" }[scope.mode];
 }
 
 /** View options › No date, for both the scheduled date and the deadline. */

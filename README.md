@@ -104,13 +104,15 @@ The Task details sidebar sits in Obsidian's right sidebar. What it shows follows
 
 In the title, Enter saves what you typed and Shift+Enter moves on to the notes (a task card in the list works the same way). Press Escape to go back to the hours or the list. **Open in note**, at the bottom, opens the task's note at its line, turning task mode off when that note would otherwise open as its task view. If you close the sidebar, run **Open task details sidebar** to bring it back.
 
+With **Task details** set to three panes, new tasks open here: Enter writes one and opens the next, ready to type, until you press Escape. New projects open here too (run **Create new project**, or use the add button in Projects): name it, set its properties, then press Enter or **Create project**.
+
 ## Choose a layout
 
 Every task view switches between list, calendar and Kanban with the buttons at its top right.
 
 ### List
 
-Click a checkbox to complete a task, or double-click a task to open it. Click a group's heading to fold its tasks away, and click it again to bring them back. Drag tasks to reorder them, move them between sections and notes, or nest them: drag right to make a task a subtask of the one above, left to move it out. Subtasks and notes travel with their task.
+Click a checkbox to complete a task, or double-click a task to open it. Click a group's heading to fold its tasks away, and click it again to bring them back. Drag tasks to reorder them, move them between sections and notes, or nest them: drag right to make a task a subtask of the one above, left to move it out. Subtasks and notes travel with their task. On a page grouped by heading, drag a heading up or down (or a board column sideways) to put the note's sections in that order, and run **Add new heading** to add one at the end of the note.
 
 You can also drop tasks on the task sidebar: on **Inbox**, a project or a note to move them there, on **Today** to schedule them for today, or on a tag to add it. Everything you can do by dragging also works from the keyboard (see [Keyboard shortcuts](#keyboard-shortcuts)).
 

@@ -795,6 +795,26 @@ body.tm-list-dragging, body.tm-list-dragging * { cursor: grabbing !important; }
   white-space: nowrap;
   pointer-events: none;
 }
+/* A note's headings, grouping a list or a board, drag to put its sections in another order: the grabbed title lifts
+   and follows the pointer, its group dims, and a line in the accent colour marks where it lands. */
+.tm-main-view .tm-heading-drag-preview {
+  position: fixed;
+  z-index: 10000;
+  margin: 0;
+  box-sizing: border-box;
+  border-radius: 8px;
+  background: var(--background-primary);
+  box-shadow: var(--shadow-l);
+  pointer-events: none;
+  transition: none;
+}
+.tm-main-view .tm-heading-drag-preview * { pointer-events: none; }
+.tm-main-view .is-heading-dragging > :not(.tm-heading-drag-preview) { opacity: .4; }
+.tm-main-view .tm-heading-draggable.is-drag-armed { border-radius: 8px; background: var(--background-modifier-hover); }
+.tm-heading-drop-line { position: fixed; z-index: 10000; border-radius: 2px; background: var(--interactive-accent); pointer-events: none; }
+.tm-heading-drop-line[hidden] { display: none; }
+body.tm-heading-dragging, body.tm-heading-dragging * { cursor: grabbing !important; user-select: none; }
+body.is-mobile .tm-main-view .tm-heading-draggable { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 /* On touch screens a long press lifts the row, ready to drag; it holds no text selection or callout. */
 .tm-main-view .tm-task-item.is-drag-armed { background: var(--background-modifier-hover); box-shadow: var(--shadow-l); }
 body.is-mobile .tm-main-view .tm-task-item { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
@@ -1036,8 +1056,6 @@ button.tm-gantt-handle.is-finish:focus-visible,
 .tm-filter-clause select.tm-filter-join { width: auto; min-width: 78px; flex: 0 0 auto; }
 .tm-filter-clause select[hidden] { display: none; }
 
-.modal.tm-smart-list-modal { width: min(900px, 95vw); }
-.tm-smart-list-filters { margin-bottom: 16px; }
 
 .tm-main-view:not(.is-kanban-view):not(.is-calendar-view) .tm-task-row:not(.tm-project-row) {
   min-height: var(--font-text-size, 16px);

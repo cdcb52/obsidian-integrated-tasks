@@ -30,6 +30,7 @@ const CALENDAR_SCOPES: CalendarScope[] = ["day", "four-day", "week", "month", "y
 const GANTT_ZOOM_NAMES = Object.keys(GANTT_ZOOMS) as GanttZoom[];
 import { kanbanColumns, type KanbanColumn } from "./kanban";
 import { ListDragController } from "./list-drag-view";
+import { HeadingDragController } from "./heading-drag";
 import { draftForGroup, isStructuralGroup, taskGroupTarget, type ListDropGroup, type ListPlacement } from "./list-drag";
 import { renderCalendar } from "./calendar-view";
 import { addDays, daysBetween, rescheduledDraft, type CalendarScope } from "./calendar";
@@ -142,6 +143,8 @@ export class TaskMainView extends ItemView {
   private unsubscribe?: () => void;
   private taskResults?: HTMLElement;
   private listDrag?: ListDragController;
+  /** Grouped by a note's headings: dragging them reorders the note's sections. */
+  private headingDrag?: HeadingDragController;
   private propertyEditors?: TaskPropertyEditors;
   private renderAfterDrag = false;
   private selection = new TaskSelection();
@@ -181,7 +184,8 @@ export class TaskMainView extends ItemView {
    * (`draft`), the task it would be where it would go (`task`), and its title and notes as typed, in a card in the list
    * or in the Task Details sidebar.
    */
-  private newTaskEntry?: PendingTask & { host: "card" | "sidebar" };
+  /** `state`: what it was started for, so the sidebar can start the next one the same way. */
+  private newTaskEntry?: PendingTask & { host: "card" | "sidebar"; state: OpenEditorState };
   private rovingRow?: HTMLElement;
   private moveTargets = new Map<string, { title: string; target: ListDropGroup }>();
   private viewOptions?: ViewOptionsPanel;
@@ -437,6 +441,8 @@ export class TaskMainView extends ItemView {
     this.disconnectRowObservers();
     this.listDrag?.dispose();
     this.listDrag = undefined;
+    this.headingDrag?.dispose();
+    this.headingDrag = undefined;
     this.plugin.refreshTaskSidebar?.();
   }
 
@@ -465,7 +471,7 @@ export class TaskMainView extends ItemView {
   /** Coalesce bursts of index updates into one refresh per frame. */
   private scheduleRender(): void {
     // A row dragged in the list stays under the pointer: the list redraws once the drag ends.
-    if (this.listDrag?.dragging) { this.renderAfterDrag = true; return; }
+    if (this.listDrag?.dragging || this.headingDrag?.dragging) { this.renderAfterDrag = true; return; }
     // A closing card refreshes the view itself once its animation ends.
     if (this.renderFrame !== undefined || this.closed || this.cardClosing) return;
     this.renderFrame = this.containerEl.win.requestAnimationFrame(() => {
@@ -629,6 +635,56 @@ export class TaskMainView extends ItemView {
     };
   }
 
+  /** A drag has ended: the redraw it held back, if any. */
+  private renderDeferred(): void {
+    if (!this.renderAfterDrag) return;
+    this.renderAfterDrag = false;
+    this.scheduleRender();
+  }
+
+  /**
+   * Drags `path`'s headings (a list's groups, `y`, or a board's columns, `x`), moving their sections in the note; a move
+   * that fails redraws the groups where they were.
+   */
+  private headingDragFor(path: string, axis: "x" | "y"): HeadingDragController {
+    this.headingDrag?.dispose();
+    const drag = new HeadingDragController(axis, (heading, before) => this.plugin.moveHeading(path, heading, before).catch((cause: unknown) => {
+      new Notice(cause instanceof Error ? cause.message : "Could not move the heading.");
+      this.renderAfterDrag = true;
+    }));
+    drag.onIdle = () => this.renderDeferred();
+    this.headingDrag = drag;
+    return drag;
+  }
+
+  /** The note whose headings group the view (a project's, as a list or a board by heading), for Add new heading. */
+  get headingNote(): string | undefined {
+    const path = this.defaults.path;
+    return path && !this.isProjectsView && this.layout !== "calendar" && this.metadataGrouping === "section" ? path : undefined;
+  }
+
+  /** Add new heading: its name typed in a popover below the title, then added at the end of the note and shown. */
+  addHeading(): void {
+    const path = this.headingNote;
+    const anchor = this.content?.querySelector<HTMLElement>(".tm-page-title") ?? this.content;
+    if (!path || !anchor) return;
+    openChoicePopover({
+      anchor, label: "Add new heading", choices: [],
+      input: { placeholder: "Heading name", invalid: "", parse: text => text.trim() ? { value: text.trim(), label: `Add heading “${text.trim()}”`, icon: "heading" } : undefined },
+      choose: name => void this.plugin.addHeading(path, name).then(() => this.revealHeading(name))
+        .catch((cause: unknown) => { new Notice(cause instanceof Error ? cause.message : "Could not add the heading."); })
+    });
+  }
+
+  /** Scrolls a heading just added into view, once the view has redrawn with it. */
+  private revealHeading(name: string): void {
+    const win = this.containerEl.win;
+    win.requestAnimationFrame(() => win.requestAnimationFrame(() => {
+      const title = Array.from(this.content?.querySelectorAll<HTMLElement>(".tm-section > h2, .tm-kanban-column-header h2") ?? []).find(item => item.textContent === name);
+      title?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }));
+  }
+
   private renderTaskResultsNow(container: HTMLElement): void {
     this.followCard();
     container.empty();
@@ -639,11 +695,9 @@ export class TaskMainView extends ItemView {
     this.listDrag = new ListDragController(id => this.plugin.index.taskById(id) ?? this.projectTasks.get(id), (id, group, anchor, placement) => this.dropListTask(id, group, anchor, placement), this.layout !== "kanban",
       // A project moves within the Projects view only, not to other panes' lists.
       task => { if (!this.shownProjects.has(task.id)) return this.prepareDrag(task); this.draggedTasks = [task]; return [task]; });
-    this.listDrag.onIdle = () => {
-      if (!this.renderAfterDrag) return;
-      this.renderAfterDrag = false;
-      this.scheduleRender();
-    };
+    this.listDrag.onIdle = () => this.renderDeferred();
+    this.headingDrag?.dispose();
+    this.headingDrag = undefined;
     const query = this.baseQuery();
     // A new task's card shows where the task would go, among the rest.
     const entry = this.newTaskEntry?.host === "card" ? [this.newTaskEntry.task] : [];
@@ -882,7 +936,7 @@ export class TaskMainView extends ItemView {
     return [
       ...projects.length ? [{ title: "Projects", tasks: projects }] : [],
       ...unsectioned.length || !headings.length ? [{ title: "No section", tasks: unsectioned, target: { destination: path } }] : [],
-      ...headings.map(heading => ({ title: heading.name, tasks: bySection.get(heading.line) ?? [], target: { destination: `${path}#${heading.name}` } }))
+      ...headings.map(heading => ({ title: heading.name, tasks: bySection.get(heading.line) ?? [], target: { destination: `${path}#${heading.name}` }, heading }))
     ];
   }
 
@@ -890,6 +944,9 @@ export class TaskMainView extends ItemView {
     const columns = this.kanbanColumns(tasks);
     if (!columns.length) { this.renderEmpty(container); return; }
     const board = container.createDiv({ cls: "tm-kanban", attr: { "aria-label": "Task board", "data-tm-scroll-key": "kanban" } });
+    // A note's headings drag sideways to put its sections in another order.
+    const path = this.defaults.path;
+    const drag = path && columns.filter(column => column.heading).length > 1 ? this.headingDragFor(path, "x") : undefined;
     for (const column of columns) {
       // Overdue reads as an alert, as its group does in a list.
       const section = board.createEl("section", { cls: `tm-kanban-column${column.alert ? " is-alert" : ""}`, attr: { "data-tm-scroll-key": `kanban:${column.title}` } });
@@ -898,6 +955,7 @@ export class TaskMainView extends ItemView {
       const title = column.target?.property && ["date", "scheduledDate", "deadline"].includes(column.target.property) && /^\d{4}-\d{2}-\d{2}$/.test(column.title)
         ? formatDate(column.title, this.plugin.dateFormat()) : column.target?.property === "source" ? noteGroupName(column.title, this.plugin.settings.noteGroupLabel) : column.title;
       header.createEl("h2", { text: title });
+      if (column.heading) drag?.add(section, header, column.heading);
       this.renderGroupAddButton(header, title, column.target);
       if (column.target) { this.listDrag?.group(section, column.target); this.addMoveTarget(title, column.target); }
       this.renderTaskList(section, column.tasks, column.target);
@@ -922,10 +980,13 @@ export class TaskMainView extends ItemView {
     // With every task under a heading, an empty list still waits above the first one, so a task can be
     // dragged there (above all headings); it takes no space until a drag opens its gap.
     this.renderTaskList(container, unsectioned, { destination: path }, Boolean(headings.length && !unsectioned.length));
+    // Its headings drag up and down to put the note's sections in another order.
+    const drag = headings.length > 1 ? this.headingDragFor(path, "y") : undefined;
     for (const heading of headings) {
       const group = bySection.get(heading.line) ?? [];
       const section = container.createEl("section", { cls: "tm-section" });
       const title = section.createEl("h2", { text: heading.name });
+      drag?.add(section, title, heading);
       const target = { destination: `${path}#${heading.name}` };
       this.renderGroupAddButton(title, heading.name, target);
       this.listDrag?.group(section, target);
@@ -1021,7 +1082,7 @@ export class TaskMainView extends ItemView {
     const pending = await startPendingTask(this.plugin, this.plugin.newTaskDraft(state), this.app.vault);
     if (!pending) { this.plugin.openEditor(state); return; }
     const task = pending.task;
-    this.newTaskEntry = { ...pending, host };
+    this.newTaskEntry = { ...pending, host, state };
     if (host === "sidebar") {
       this.clearSelection();
       void this.plugin.showInTaskSidebar(NEW_TASK_ID, { focus: true }).catch((error: unknown) => new Notice(String(error)));
@@ -1060,12 +1121,14 @@ export class TaskMainView extends ItemView {
   }
 
   /**
-   * For the Task Details sidebar: Enter writes the new task when it has a title and selects it, so the sidebar goes on
-   * showing it; Escape (`write` off) drops it.
+   * For the Task Details sidebar: Enter writes the new task when it has a title and (`another`) starts the next one as
+   * this one was started, or else selects it, so the sidebar goes on showing it; Escape (`write` off) drops it.
    */
-  async finishNewTask(write = true): Promise<void> {
+  async finishNewTask(write = true, another = false): Promise<void> {
+    const state = this.newTaskEntry?.state;
     const task = await this.endNewTask(write);
     if (!task) return;
+    if (another && state) { await this.startNewTask(state, "sidebar"); return; }
     this.revealInSidebar(task);
     this.selectionRows.get(task.id)?.[0]?.focus({ preventScroll: true });
   }
@@ -1131,6 +1194,13 @@ export class TaskMainView extends ItemView {
     openProjectMenu(this.plugin, project, anchor, {
       at, editDescription: this.taskSourcePath === project.path && this.headerDescription ? () => this.editDescription(project) : undefined
     });
+  }
+
+  /** The smart list's actions (Open smart list actions), as its "…" button opens them. */
+  openSmartListActions(): void {
+    const list = this.state.mode === "smartLists" ? this.plugin.settings.smartLists.find(item => item.id === this.state.smartListId) : undefined;
+    const button = this.content?.querySelector<HTMLElement>(".tm-title-more");
+    if (list && button) this.openSmartListMenu(list, button);
   }
 
   /**
@@ -1374,10 +1444,8 @@ export class TaskMainView extends ItemView {
   private renderSmartLists(container: HTMLElement): void {
     const header = container.createDiv({ cls: "tm-view-header" });
     pageTitle(header, "Smart Lists");
-    header.createEl("button", { text: "Create new smart list", cls: "mod-cta" })
-      .addEventListener("click", () => this.plugin.openSmartListEditor());
     const lists = this.plugin.settings.smartLists;
-    if (!lists.length) container.createDiv({ cls: "tm-empty", text: "No smart lists yet. Save filters, sorting, and grouping to create one." });
+    if (!lists.length) container.createDiv({ cls: "tm-empty", text: "No smart lists yet. In any view, set its filters, sorting and grouping, then choose Convert to smart list at the bottom of View options." });
     const entries = container.createDiv({ cls: "tm-task-list", attr: { role: "list" } });
     for (const list of lists) {
       const row = entries.createDiv({ cls: "tm-task-row tm-project-row is-single-line", attr: { role: "listitem" } });
