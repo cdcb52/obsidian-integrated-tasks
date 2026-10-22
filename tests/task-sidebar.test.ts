@@ -1058,5 +1058,38 @@ describe("a note's headings in its task view", () => {
     await view.setState({ mode: "all" });
     expect(view.headingNote).toBeUndefined();
   });
-});
 
+  it("shows the completed tasks section only while done or cancelled tasks are listed, when completed tasks move there", async () => {
+    const context = await setup([["Projects/P.md", "# A\n- [ ] a\n\n# B\n- [ ] b\n\n# Task Log\n- [x] done"]]);
+    const { view, main, plugin } = context;
+    plugin.settings.completedPlacement = "section";
+    await view.setState({ mode: "all", pagePath: "Projects/P.md" });
+    const titles = () => Array.from(main().querySelectorAll(".tm-section > h2")).map(title => title.textContent);
+    expect(titles()).toEqual(["A", "B"]);
+    // View options › Status with Done (or Cancelled) ticked.
+    const internals = view as unknown as { propertyFilters: unknown[]; renderTaskResults(): void };
+    internals.propertyFilters = [{ property: "status", operator: "is", values: ["To do", "Cancelled"] }];
+    internals.renderTaskResults();
+    expect(titles()).toEqual(["A", "B", "Task Log"]);
+    internals.propertyFilters = [{ property: "status", operator: "is", values: ["To do"] }];
+    internals.renderTaskResults();
+    expect(titles()).toEqual(["A", "B"]);
+    // Dropped after the last heading shown, a section goes above the hidden one, which stays last.
+    const [a, b] = Array.from(main().querySelectorAll<HTMLElement>(".tm-section > h2"));
+    [a, b].forEach((title, index) => {
+      title.getBoundingClientRect = () => new DOMRect(0, index * 100, 300, 30);
+      title.closest("section")!.getBoundingClientRect = () => new DOMRect(0, index * 100, 300, 90);
+    });
+    const pointer = (target: EventTarget, type: string, y: number) =>
+      target.dispatchEvent(new PointerEvent(type, { pointerId: 1, button: 0, clientX: 10, clientY: y, bubbles: true, cancelable: true }));
+    pointer(a, "pointerdown", 10);
+    pointer(document, "pointermove", 180);
+    pointer(document, "pointerup", 180);
+    await vi.waitFor(() => expect(plugin.moveHeading).toHaveBeenCalledOnce());
+    expect(plugin.moveHeading).toHaveBeenCalledWith("Projects/P.md", expect.objectContaining({ name: "A" }), expect.objectContaining({ name: "Task Log" }));
+    // Kept where completed tasks stay put.
+    plugin.settings.completedPlacement = "keep";
+    internals.renderTaskResults();
+    expect(titles()).toEqual(["A", "B", "Task Log"]);
+  });
+});

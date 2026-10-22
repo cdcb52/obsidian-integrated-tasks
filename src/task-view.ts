@@ -1,5 +1,6 @@
 import { taskTitleLabel } from "./task-title";
-import { noteGroupName, splitDestination } from "./structure";
+import { completedSectionName, noteGroupName, splitDestination, type NoteHeading } from "./structure";
+import { matchesFilter } from "./task-properties";
 import { projectStatuses, renderProjectProgress } from "./project-progress";
 import { renderProjectHeaderDetails } from "./project-header-details";
 import { renderTaskDetails } from "./task-row-details";
@@ -207,6 +208,28 @@ export class TaskMainView extends ItemView {
    * board grouped by status, which has a group for each.
    */
   private get showsCompleted(): boolean { return this.showCompleted || this.isProjectsView || (this.grouping === "status" && this.layout !== "calendar"); }
+
+  /** Whether done or cancelled tasks are listed: grouped by status, or with View options › Status ticking either. */
+  private get showsClosed(): boolean {
+    if (this.showsCompleted) return true;
+    const status = this.propertyFilters.find(filter => filter.property === "status");
+    return Boolean(status && (["done", "cancelled"] as const).some(value => matchesFilter({ status: value, completed: true } as Task, status)));
+  }
+
+  /**
+   * A note's headings as its groups (or columns) show them. With completed tasks moved to their own section (Settings ›
+   * Completed tasks), that section shows only while done or cancelled tasks are listed (or one of `tasks`, the listed
+   * ones, is in it); `hidden` is it, when left out.
+   */
+  private visibleHeadings(path: string, tasks: Task[] = []): { headings: NoteHeading[]; hidden?: NoteHeading } {
+    const headings = this.plugin.index.headingsForPath(path);
+    const settings = this.plugin.settings;
+    if (settings.completedPlacement !== "section" || this.showsClosed) return { headings };
+    const name = completedSectionName(settings.completedSection).toLocaleLowerCase();
+    const hidden = headings.find(heading => heading.name.toLocaleLowerCase() === name);
+    if (!hidden || tasks.some(task => task.sectionLine === hidden.line)) return { headings };
+    return { headings: headings.filter(heading => heading !== hidden), hidden };
+  }
 
   /** The Projects view in its Gantt layout. */
   private get isGantt(): boolean { return this.isProjectsView && this.projectLayout === "gantt"; }
@@ -644,11 +667,13 @@ export class TaskMainView extends ItemView {
 
   /**
    * Drags `path`'s headings (a list's groups, `y`, or a board's columns, `x`), moving their sections in the note; a move
-   * that fails redraws the groups where they were.
+   * that fails redraws the groups where they were. `hidden`: the completed tasks section, when not shown.
    */
-  private headingDragFor(path: string, axis: "x" | "y"): HeadingDragController {
+  private headingDragFor(path: string, axis: "x" | "y", hidden?: NoteHeading): HeadingDragController {
     this.headingDrag?.dispose();
-    const drag = new HeadingDragController(axis, (heading, before) => this.plugin.moveHeading(path, heading, before).catch((cause: unknown) => {
+    // Dropped after the last heading shown, a section goes above a hidden completed tasks section, which stays last.
+    const last = hidden && this.plugin.index.headingsForPath(path).at(-1) === hidden ? hidden : undefined;
+    const drag = new HeadingDragController(axis, (heading, before) => this.plugin.moveHeading(path, heading, before ?? last).catch((cause: unknown) => {
       new Notice(cause instanceof Error ? cause.message : "Could not move the heading.");
       this.renderAfterDrag = true;
     }));
@@ -931,7 +956,7 @@ export class TaskMainView extends ItemView {
       const group = bySection.get(task.sectionLine);
       if (group) group.push(task); else bySection.set(task.sectionLine, [task]);
     }
-    const headings = this.plugin.index.headingsForPath(path);
+    const { headings } = this.visibleHeadings(path, items);
     const unsectioned = bySection.get(undefined) ?? [];
     return [
       ...projects.length ? [{ title: "Projects", tasks: projects }] : [],
@@ -946,7 +971,7 @@ export class TaskMainView extends ItemView {
     const board = container.createDiv({ cls: "tm-kanban", attr: { "aria-label": "Task board", "data-tm-scroll-key": "kanban" } });
     // A note's headings drag sideways to put its sections in another order.
     const path = this.defaults.path;
-    const drag = path && columns.filter(column => column.heading).length > 1 ? this.headingDragFor(path, "x") : undefined;
+    const drag = path && columns.filter(column => column.heading).length > 1 ? this.headingDragFor(path, "x", this.visibleHeadings(path, tasks).hidden) : undefined;
     for (const column of columns) {
       // Overdue reads as an alert, as its group does in a list.
       const section = board.createEl("section", { cls: `tm-kanban-column${column.alert ? " is-alert" : ""}`, attr: { "data-tm-scroll-key": `kanban:${column.title}` } });
@@ -964,7 +989,7 @@ export class TaskMainView extends ItemView {
   }
 
   private renderProjectSections(container: HTMLElement, path: string, items: Task[]): void {
-    const headings = this.plugin.index.headingsForPath(path);
+    const { headings, hidden } = this.visibleHeadings(path, items);
     // Subprojects (View options › Projects) are a group of their own, above the note's tasks.
     const projects = items.filter(item => this.shownProjects.has(item.id));
     if (projects.length) this.renderSection(container, "Projects", projects);
@@ -981,7 +1006,7 @@ export class TaskMainView extends ItemView {
     // dragged there (above all headings); it takes no space until a drag opens its gap.
     this.renderTaskList(container, unsectioned, { destination: path }, Boolean(headings.length && !unsectioned.length));
     // Its headings drag up and down to put the note's sections in another order.
-    const drag = headings.length > 1 ? this.headingDragFor(path, "y") : undefined;
+    const drag = headings.length > 1 ? this.headingDragFor(path, "y", hidden) : undefined;
     for (const heading of headings) {
       const group = bySection.get(heading.line) ?? [];
       const section = container.createEl("section", { cls: "tm-section" });
