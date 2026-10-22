@@ -17,7 +17,7 @@ Works on **desktop and mobile** with **Obsidian 1.7.2 or newer**. Your tasks sta
 ## Get started
 
 1. In Obsidian, open **Settings → Community plugins → Browse**, search for **Integrated Task Manager**, then install and enable it.
-2. Click **Open task manager** in the ribbon to open the task sidebar, where your views, projects and tags live. The Task details sidebar opens on the right.
+2. Click **Open task manager** in the ribbon, or run it from the command palette, to open the task sidebar, where your views, projects and tags live. The Task details sidebar opens on the right.
 3. Open **Inbox**, click **+**, and type something like `Call the venue tomorrow at 9am p1`. Press Enter to add it.
 4. Open **Today** or **Upcoming** to see your plan.
 

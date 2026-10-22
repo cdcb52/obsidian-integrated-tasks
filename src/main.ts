@@ -89,6 +89,8 @@ export default class TaskManagerPlugin extends Plugin {
     });
     this.addSettingTab(new TaskManagerSettingTab(this.app, this));
     this.addRibbonIcon("circle-check-big", "Open task manager", () => void this.activateNavigation().catch((error) => new Notice(String(error))));
+    // The ribbon's button as a command, for the command palette, a hotkey or the mobile toolbar.
+    this.addCommand({ id: "open-task-manager", name: "Open task manager", callback: () => void this.activateNavigation().catch((error) => new Notice(String(error))) });
 
     const commands: Array<[TaskViewMode, string, string]> = [
       ["inbox", "Open inbox", "open-inbox"],
