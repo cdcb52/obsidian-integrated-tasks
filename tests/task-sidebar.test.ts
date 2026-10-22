@@ -4,7 +4,7 @@ import { installObsidianDom } from "./helpers/obsidian-dom";
 
 vi.mock("obsidian", async importOriginal => {
   const original = await importOriginal<typeof import("./obsidian-mock")>();
-  return { ...original, Menu: class {}, Notice: class {}, setIcon: vi.fn() };
+  return { ...original, Menu: class {}, Modal: class {}, Notice: class {}, setIcon: vi.fn() };
 });
 
 import { MarkdownView, Platform, TFile, type App, type WorkspaceLeaf } from "obsidian";
@@ -15,6 +15,7 @@ import { startTaskDrag, TASK_DRAG_TYPE } from "../src/sidebar-drop";
 import { DEFAULT_SETTINGS, type Task, type TaskDraft } from "../src/types";
 import { todayIso } from "../src/date";
 import type TaskManagerPlugin from "../src/main";
+import { projectNotePath, type ProjectDraft } from "../src/project-creator";
 
 beforeAll(() => {
   installObsidianDom();
@@ -79,7 +80,9 @@ async function setup(notes: Array<[string, string]>) {
     openEditor: vi.fn(), openTag: vi.fn().mockResolvedValue(undefined), openQuickSwitcher: vi.fn(), undoTaskChange: vi.fn(), redoTaskChange: vi.fn(),
     refreshTaskSidebar: () => sidebar.render(),
     showInTaskSidebar: vi.fn(async (id: string, options?: { focus?: boolean }) => sidebar.showTask(id, options)),
-    newTaskDraft: () => ({ title: "", completed: false, indent: 0, destination: "A.md" }), projectDraft: () => ({ tags: "" })
+    newTaskDraft: () => ({ title: "", completed: false, indent: 0, destination: "A.md" }), projectDraft: () => ({ tags: "" }),
+    // As the plugin does, a name it cannot use is refused before anything is written.
+    createProjectNote: vi.fn(async (draft: ProjectDraft) => `Projects/${projectNotePath(draft.name)}`), openProject: vi.fn().mockResolvedValue(undefined)
   };
   const view = new TaskMainView({ app } as unknown as WorkspaceLeaf, plugin as unknown as TaskManagerPlugin);
   const sidebar = new TaskSidebarView({ app } as unknown as WorkspaceLeaf, plugin as unknown as TaskManagerPlugin);
@@ -890,5 +893,68 @@ describe("beside a note (no task view in front)", () => {
     await vi.waitFor(() => expect(store.create).toHaveBeenCalledOnce());
     expect(contents.get("A.md")).toBe("- [ ] Call the venue\n- [ ] Existing");
     await vi.waitFor(() => expect(side().querySelector<HTMLTextAreaElement>(".tm-sidebar-title-field")?.value).toBe("Call the venue"));
+  });
+});
+
+describe("a project created in the Task Details sidebar (three panes)", () => {
+  const property = (side: HTMLElement, name: string) => side.querySelector<HTMLElement>(`[data-tm-focus-key='sidebar-project-${name}']`)!;
+
+  it("takes the sidebar's place until created: its name typed, its properties from their popovers, Enter writes it and opens it", async () => {
+    const { view, sidebar, main, side, plugin } = await setup([["A.md", "- [ ] Plan the offsite"]]);
+    await view.setState({ mode: "all" });
+    rows(main())[0].click();
+    await sidebar.startNewProject();
+    expect(side().querySelector(".tm-sidebar-details.is-new-project")).not.toBeNull();
+    const title = side().querySelector<HTMLTextAreaElement>(".tm-sidebar-title-field")!;
+    expect(title.value).toBe("");
+    expect(title.placeholder).toBe("New project");
+    expect(document.activeElement).toBe(title);
+    expect(Array.from(side().querySelectorAll(".tm-sidebar-property-name")).map(name => name.textContent))
+      .toEqual(["Status", "Start date", "End date", "Deadline", "Priority", "Parent project", "Tags", "Color"]);
+    title.value = "Launch";
+    title.dispatchEvent(new Event("input"));
+
+    property(side(), "priority").click();
+    document.querySelector<HTMLElement>(".tm-choice-popover [data-value='1']")!.click();
+    expect(side().querySelector(".tm-sidebar-property.is-p1")).not.toBeNull();
+    property(side(), "status").click();
+    document.querySelector<HTMLElement>(".tm-choice-popover [data-value='doing']")!.click();
+    expect(property(side(), "status").textContent).toContain("In progress");
+    // A choice redraws the creator, keeping what was typed.
+    expect(side().querySelector<HTMLTextAreaElement>(".tm-sidebar-title-field")!.value).toBe("Launch");
+    const description = side().querySelector<HTMLTextAreaElement>("textarea.tm-sidebar-notes")!;
+    description.value = "For the autumn";
+    description.dispatchEvent(new Event("input"));
+
+    side().querySelector<HTMLTextAreaElement>(".tm-sidebar-title-field")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(plugin.openProject).toHaveBeenCalledExactlyOnceWith("Projects/Launch.md"));
+    expect(plugin.createProjectNote).toHaveBeenCalledExactlyOnceWith({ name: "Launch", date: "", endDate: "", deadline: "", priority: "1", parent: "", tags: "project", status: "doing", color: "", description: "For the autumn" });
+    // The selected task shows again.
+    expect(side().querySelector(".is-new-project")).toBeNull();
+    expect(side().querySelector<HTMLTextAreaElement>(".tm-sidebar-title-field")!.value).toBe("Plan the offsite");
+  });
+
+  it("says why a project cannot be created, and goes with Escape or a task selected in the view", async () => {
+    const { view, sidebar, main, side, plugin } = await setup([["A.md", "- [ ] Plan the offsite"]]);
+    await view.setState({ mode: "all" });
+    await sidebar.startNewProject();
+    // Enter does nothing until it is named; the button says what is missing.
+    const title = side().querySelector<HTMLTextAreaElement>(".tm-sidebar-title-field")!;
+    title.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    expect(plugin.createProjectNote).not.toHaveBeenCalled();
+    side().querySelector<HTMLButtonElement>(".tm-sidebar-create button")!.click();
+    await vi.waitFor(() => expect(side().querySelector(".tm-sidebar-error")!.textContent).toBe("Enter a project name without path separators or special filename characters."));
+    expect(plugin.openProject).not.toHaveBeenCalled();
+    expect(side().querySelector(".is-new-project")).not.toBeNull();
+
+    side().dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    expect(side().querySelector(".is-new-project")).toBeNull();
+    expect(side().querySelector(".tm-sidebar-empty h3")!.textContent).toBe("No task selected");
+
+    await sidebar.startNewProject();
+    rows(main())[0].click();
+    sidebar.render();
+    expect(side().querySelector(".is-new-project")).toBeNull();
+    expect(side().querySelector<HTMLTextAreaElement>(".tm-sidebar-title-field")!.value).toBe("Plan the offsite");
   });
 });

@@ -2709,6 +2709,14 @@ button.tm-sidebar-open-note:hover, button.tm-sidebar-open-note:focus-visible { b
 .tm-task-sidebar.tm-style-things .tm-sidebar-subtask-add { --checkbox-size: 12px; --checkbox-radius: 50%; border: 1.5px dashed var(--interactive-accent); opacity: 0.6; }
 .tm-sidebar-subtask.is-new input::placeholder { color: var(--text-faint); }
 @media (pointer: coarse) { .tm-sidebar-property, .tm-sidebar-subtask { min-height: 40px; } }
+/* A project being created (three panes): its progress ring in the checkbox's place, sized to the title's first line; its
+   colour as a swatch; any problem creating it, then the Create project button. */
+.tm-task-sidebar .tm-sidebar-head .tm-sidebar-project-ring { display: flex; align-items: center; justify-content: center; height: calc(var(--tm-sidebar-title-size) * 1.35); }
+.tm-sidebar-project-ring .tm-project-progress { min-height: 0; font-size: var(--font-ui-medium); }
+.tm-sidebar-project-swatch { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--tm-project-color); }
+.tm-task-sidebar .tm-sidebar-error { min-height: 0; margin: var(--size-4-2) 6px 0; }
+.tm-task-sidebar .tm-sidebar-error:empty { display: none; }
+.tm-sidebar-footer.tm-sidebar-create { justify-content: flex-end; margin-top: var(--size-4-3); }
 /* View options' footer: Convert to smart list, below the options, always in view. */
 .tm-options-footer { flex-shrink: 0; padding: 8px 12px; border-top: 1px solid var(--background-modifier-border); }
 button.tm-options-convert, button.tm-options-update {

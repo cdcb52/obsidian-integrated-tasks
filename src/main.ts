@@ -582,7 +582,13 @@ export default class TaskManagerPlugin extends Plugin {
     new TaskQuickSwitcher(this.app, this).open();
   }
 
+  /** A new project: with three panes in the Task Details sidebar, as a new task there; else in the Create project window. */
   openProjectCreator(): void {
+    if (tasksOpenInSidebar(this.settings)) { void this.newProjectInSidebar().catch(error => new Notice(String(error))); return; }
+    this.openProjectCreatorModal();
+  }
+
+  private openProjectCreatorModal(): void {
     new ProjectCreatorModal(this.app, {
       projects: this.index.projects(), dateFormat: this.dateFormat(), linkDates: this.settings.linkDates,
       createProject: async draft => { await this.openProject(await this.createProjectNote(draft)); }
@@ -873,6 +879,13 @@ export default class TaskManagerPlugin extends Plugin {
   openTask(task: Task, focusProperty?: TaskEditorProperty): void {
     if (tasksOpenInSidebar(this.settings)) void this.showInTaskSidebar(task.id, { focus: !Platform.isMobile }).catch(error => new Notice(String(error)));
     else this.openEditor({ mode: "all", task, ...(focusProperty ? { focusProperty } : {}) });
+  }
+
+  private async newProjectInSidebar(): Promise<void> {
+    await this.activateTaskSidebar(true);
+    const sidebar = this.app.workspace.getLeavesOfType(TASK_SIDEBAR_VIEW)[0]?.view;
+    if (sidebar instanceof TaskSidebarView) await sidebar.startNewProject();
+    else this.openProjectCreatorModal();
   }
 
   private async newTaskInSidebar(state: OpenEditorState): Promise<void> {

@@ -16,7 +16,7 @@ import { draftFromTask, draftFromTitle, draftMatchesTask } from "./task-draft";
 import type { TaskEditorProperty } from "./task-editor";
 import { taskInputRanges } from "./task-input";
 import { deadlineIsDistant, deadlineIsOverdue, editable, renderTaskDetails, taskDeadlineCountdown, taskTimeDurationLabel, taskTimeLabel } from "./task-row-details";
-import { STATUS_ICONS, STATUS_LABELS, checkboxLabel, statusClass } from "./task-status";
+import { STATUS_ICONS, STATUS_LABELS, TASK_STATUSES, checkboxLabel, statusClass } from "./task-status";
 import { PRIORITY_NAMES, cardNotes, longDate, paintTokens, repeatIcon, type TaskCardDraft } from "./things-task-card";
 import { NoteTaskHost } from "./note-task-host";
 import { createTaskRow, dropEmptyRowParts } from "./task-row";
@@ -26,7 +26,10 @@ import { dismissPopovers, openChoicePopover } from "./choice-popover";
 import { cloneTaskFilters } from "./task-filters";
 import { listGlyph, SMART_LIST_GLYPH, TAG_GLYPH } from "./navigation-view";
 import { activeProjects, renderProjectProgress } from "./project-progress";
-import type { SavedViewOptions, Task, TaskEditorPreset, TaskGrouping, TaskQuery, TaskSort } from "./types";
+import { openProjectDraftProperty } from "./project-menu";
+import { projectColorValue } from "./project-properties";
+import type { ProjectDraft } from "./project-creator";
+import type { Project, SavedViewOptions, Task, TaskEditorPreset, TaskGrouping, TaskQuery, TaskSort, TaskStatus } from "./types";
 
 export const TASK_SIDEBAR_VIEW = "task-manager-sidebar";
 
@@ -48,6 +51,13 @@ function autosize(area: HTMLTextAreaElement): void {
   area.setCssStyles({ height: "auto" });
   area.setCssStyles({ height: `${area.scrollHeight}px` });
 }
+
+/**
+ * A project being created here (three panes; see TaskSidebarView.startNewProject): its properties so far; `version`
+ * counts the choices that redraw it (not typing), and `error` is why it could not be created.
+ */
+interface NewProject { draft: ProjectDraft; version: number; error: string; creating: boolean }
+const NEW_PROJECT_ID = "new-project";
 
 /** One part of the sidebar, redrawn only when what it shows changes, so typing in one is not disturbed by the other. */
 interface Section { element: HTMLElement; drawn?: string }
@@ -102,6 +112,8 @@ export class TaskSidebarView extends ItemView {
   private viewSelection = "";
   /** The task the details show, or "selection" for several tasks, if any (Escape, or the close button, takes them away). */
   private shownId?: string;
+  /** A project being created, which has the sidebar to itself until it is created or dropped. */
+  private newProject?: NewProject;
   /** A drag of tasks in progress somewhere: Today's hours or the tasks without a date come back for it. */
   private dragging = false;
   private stopDragWatch?: () => void;
@@ -198,14 +210,16 @@ export class TaskSidebarView extends ItemView {
     const viewSelection = selected.map(task => task.id).join("\n");
     if (viewSelection !== this.viewSelection) {
       this.viewSelection = viewSelection;
-      if (selected.length) this.localId = undefined;
+      // As it does from a project being created.
+      if (selected.length) { this.localId = undefined; this.newProject = undefined; }
     }
     if (mode !== this.mode) { this.localId = undefined; this.listRows = LIST_PAGE; }
     const local = this.localId ? this.plugin.index.taskById(this.localId) : undefined;
     if (!local) this.localId = undefined;
-    // A new task the view started here (three panes) comes first, until it is written or dropped.
-    const entry = host?.newTaskInSidebar();
-    const task = entry?.task ?? local ?? (selected.length === 1 ? selected[0] : undefined);
+    // A project being created comes first, then a new task the view started here (three panes), until each is written or dropped.
+    const creating = this.newProject;
+    const entry = creating ? undefined : host?.newTaskInSidebar();
+    const task = creating ? undefined : entry?.task ?? local ?? (selected.length === 1 ? selected[0] : undefined);
     this.followTask(task, entry);
     const settings = this.plugin.settings;
     const skeleton = [mode, settings.style, settings.density].join("|");
@@ -227,8 +241,8 @@ export class TaskSidebarView extends ItemView {
     const details = this.details!;
     // One at a time: a task shown (or several selected) has the sidebar to itself; without one (or after Escape), it
     // shows Today's hours or the tasks without a date, as a drag of tasks also brings them back meanwhile, to drop on.
-    const several = !task && selected.length > 1;
-    this.shownId = task?.id ?? (several ? "selection" : undefined);
+    const several = !creating && !task && selected.length > 1;
+    this.shownId = creating ? NEW_PROJECT_ID : task?.id ?? (several ? "selection" : undefined);
     const alone = Boolean(this.shownId) && !(this.dragging && planner);
     this.content.toggleClass("is-showing-task", alone);
     if (planner) planner.element.hidden = alone;
@@ -240,7 +254,8 @@ export class TaskSidebarView extends ItemView {
     details.element.hidden = !shown;
     // A new task redraws as its properties change (not as it is typed).
     const idleShown = !task && !several && [idle.key, idle.label];
-    this.draw(details, JSON.stringify([shown, Boolean(view), Boolean(host), local ? "local" : selected.length, task?.id, entry && [entry.task, entry.destination], task?.raw, task?.description, task && this.children(task).map(child => child.raw), several && selected.map(item => item.raw), idleShown]), force,
+    if (creating) this.draw(details, JSON.stringify([shown, NEW_PROJECT_ID, creating.version]), force, () => { if (shown) this.renderProjectCreator(details.element, creating); });
+    else this.draw(details, JSON.stringify([shown, Boolean(view), Boolean(host), local ? "local" : selected.length, task?.id, entry && [entry.task, entry.destination], task?.raw, task?.description, task && this.children(task).map(child => child.raw), several && selected.map(item => item.raw), idleShown]), force,
       () => { if (shown) this.renderDetails(details.element, host, entry ? [] : local ? [local] : selected, task, entry?.destination); });
     // The idle list follows the tasks and its View options as they change; its head (and so its open View options) stays.
     const idleList = this.idleList;
@@ -299,6 +314,7 @@ export class TaskSidebarView extends ItemView {
    * the tasks without a date) or that no task is selected. What was typed in it is not saved; a new task is dropped.
    */
   private closeDetails(): void {
+    if (this.newProject) { this.newProject = undefined; this.render(); return; }
     const host = this.host();
     this.draft = undefined;
     this.localId = undefined;
@@ -309,6 +325,7 @@ export class TaskSidebarView extends ItemView {
 
   /** Shows a task of the day or the list in the details, until another is selected here or in the view. */
   private select(task: Task): void {
+    this.newProject = undefined;
     this.localId = task.id;
     this.render();
   }
@@ -320,6 +337,7 @@ export class TaskSidebarView extends ItemView {
   showTask(id: string, options: { focus?: boolean } = {}): void {
     // Settle on the view in front first (a redraw may be pending), so the task is not taken for the last view's.
     this.render();
+    this.newProject = undefined;
     if (id !== NEW_TASK_ID) this.localId = id;
     this.render();
     if (options.focus) this.content.querySelector<HTMLTextAreaElement>(".tm-sidebar-title-field")?.focus();
@@ -330,7 +348,23 @@ export class TaskSidebarView extends ItemView {
    * empty to type; Enter writes it once titled, as a task view's.
    */
   async startNewTask(state: OpenEditorState): Promise<void> {
+    this.newProject = undefined;
     await this.note.startNewTask(state);
+    this.render();
+    this.content.querySelector<HTMLTextAreaElement>(".tm-sidebar-title-field")?.focus();
+  }
+
+  /**
+   * Starts a new project here, with three panes, in place of the Create project window: its name empty to type, its
+   * properties below as a task's. Enter in the name (or Create project) writes its note and opens its page; Escape
+   * drops it.
+   */
+  async startNewProject(): Promise<void> {
+    await this.saveDraft();
+    this.newProject = {
+      draft: { name: "", date: "", endDate: "", deadline: "", priority: "", parent: "", tags: "project", status: "", color: "", description: "" },
+      version: 0, error: "", creating: false
+    };
     this.render();
     this.content.querySelector<HTMLTextAreaElement>(".tm-sidebar-title-field")?.focus();
   }
@@ -1055,6 +1089,142 @@ export class TaskSidebarView extends ItemView {
       if (task.repeat) value.setText(things ? `Repeats ${repeatLabel(task.repeat).toLowerCase()}` : repeatLabel(task.repeat));
     });
     return properties;
+  }
+
+  /**
+   * A project to create, laid out as a task's details: its name over its properties, each opening the popover a
+   * project's page opens, then its description and the Create project button.
+   */
+  private renderProjectCreator(container: HTMLElement, entry: NewProject): void {
+    const { draft } = entry;
+    const now = new Date();
+    const things = this.plugin.settings.style === "things";
+    const panel = container.createDiv({ cls: "tm-sidebar-details is-new-project" });
+
+    const head = panel.createDiv({ cls: "tm-sidebar-head" });
+    // In the checkbox's place, an empty progress ring in its colour, as the task sidebar draws a project.
+    const ring = head.createDiv({ cls: "tm-sidebar-project-ring" });
+    renderProjectProgress(ring, { name: draft.name.trim() || "New project", path: "", openTasks: 0, completedTasks: 0, color: projectColorValue(draft.color) } as Project, false);
+    const titleBox = head.createDiv({ cls: "tm-things-card-title-box" });
+    const backdrop = titleBox.createDiv({ cls: "tm-things-card-title-backdrop", attr: { "aria-hidden": "true" } });
+    const title = titleBox.createEl("textarea", { cls: "tm-things-card-title tm-sidebar-title-field", attr: { "aria-label": "Project name", placeholder: "New project", rows: "1", "data-tm-focus-key": "sidebar-project-name" } });
+    title.value = draft.name;
+    backdrop.setText(draft.name);
+    const close = head.createEl("button", { cls: "clickable-icon tm-sidebar-close", attr: { type: "button", "aria-label": "Close", title: "Close (Escape)", "data-tm-focus-key": "sidebar-close" } });
+    setIcon(close, "x");
+    close.addEventListener("click", () => this.closeDetails());
+
+    const properties = panel.createDiv({ cls: "tm-sidebar-properties", attr: { role: "group", "aria-label": "Properties" } });
+    const row = (icon: string, name: string, property: keyof ProjectDraft, fill: (value: HTMLElement) => void, cls = ""): void => {
+      const element = properties.createDiv({ cls: `tm-sidebar-property${cls ? ` ${cls}` : ""}` });
+      const label = element.createSpan({ cls: "tm-sidebar-property-name" });
+      setIcon(label.createSpan({ cls: "tm-sidebar-property-icon", attr: { "aria-hidden": "true" } }), icon);
+      label.createSpan({ text: name });
+      const value = element.createSpan({ cls: "tm-sidebar-property-value" });
+      fill(value);
+      if (!value.childElementCount && !value.textContent) { value.addClass("is-empty"); value.setText(things ? name : "None"); }
+      editable(element, `${name}: ${value.textContent}`, `sidebar-project-${property}`, () => this.editNewProject(entry, property, element));
+    };
+    const status = (TASK_STATUSES as readonly string[]).includes(draft.status ?? "") ? draft.status as TaskStatus : undefined;
+    row(status ? STATUS_ICONS[status] : "circle-dashed", "Status", "status", value => { if (status) value.setText(STATUS_LABELS[status]); }, status ? `is-status${statusClass(status)}` : "");
+    const date = (iso: string) => (value: HTMLElement): void => { if (iso) value.setText(longDate(iso, now)); };
+    row("calendar", "Start date", "date", date(draft.date));
+    row("calendar-check", "End date", "endDate", date(draft.endDate));
+    row("flag", "Deadline", "deadline", value => {
+      if (!draft.deadline) return;
+      value.createSpan({ text: longDate(draft.deadline, now) });
+      value.createSpan({ cls: "tm-sidebar-property-extra", text: things ? thingsDeadlineLabel(draft.deadline, now) : taskDeadlineCountdown(draft.deadline, now) });
+    });
+    const priority = /^[123]$/.test(draft.priority) ? Number(draft.priority) as 1 | 2 | 3 : undefined;
+    row("signal", "Priority", "priority", value => {
+      if (!priority) return;
+      if (!things) { value.setText(`P${priority} · ${PRIORITY_NAMES[priority]}`); return; }
+      value.createSpan({ text: `${PRIORITY_NAMES[priority]} priority` });
+      value.createSpan({ cls: "tm-sidebar-property-extra", text: `P${priority}` });
+    }, priority ? `is-p${priority}` : "");
+    row("folder-tree", "Parent project", "parent", value => {
+      if (!draft.parent) return;
+      const source = value.createSpan({ cls: "tm-task-source", text: noteName(draft.parent) });
+      const color = this.plugin.index.projectColor(draft.parent);
+      if (color) source.style.setProperty("--tm-project-color", color);
+    });
+    row("tag", "Tags", "tags", value => {
+      for (const tag of draft.tags.split(/[,\s]+/).map(tag => tag.replace(/^#/, "")).filter(Boolean)) {
+        if (things) { value.createSpan({ cls: "tm-things-card-tag", text: tag }); continue; }
+        const pill = value.createSpan({ cls: "tm-task-tag" });
+        setIcon(pill.createSpan({ cls: "tm-task-detail-icon", attr: { "aria-hidden": "true" } }), "tag");
+        pill.createSpan({ text: tag });
+      }
+    });
+    row("palette", "Color", "color", value => {
+      const color = projectColorValue(draft.color);
+      if (!color || !draft.color) return;
+      value.createSpan({ cls: "tm-sidebar-project-swatch", attr: { "aria-hidden": "true" } }).style.setProperty("--tm-project-color", color);
+      value.createSpan({ text: draft.color.startsWith("#") ? draft.color : draft.color[0].toUpperCase() + draft.color.slice(1) });
+    });
+
+    const description = panel.createEl("textarea", { cls: "tm-sidebar-notes", attr: { "aria-label": "Description", placeholder: "Add description", rows: "2", "data-tm-focus-key": "sidebar-project-description" } });
+    description.value = draft.description ?? "";
+    panel.createDiv({ cls: "tm-editor-error tm-sidebar-error", text: entry.error, attr: { role: "alert" } });
+    const footer = panel.createDiv({ cls: "tm-sidebar-footer tm-sidebar-create" });
+    const create = footer.createEl("button", { cls: "mod-cta", text: "Create project", attr: { type: "button", "data-tm-focus-key": "sidebar-project-create" } });
+    create.addEventListener("click", () => void this.createNewProject(entry));
+
+    // Typing is kept as it goes, without a redraw.
+    title.addEventListener("input", () => {
+      if (/[\r\n]/.test(title.value)) title.value = title.value.replace(/[\r\n]+/g, " ");
+      autosize(title);
+      backdrop.setText(title.value);
+      entry.draft = { ...entry.draft, name: title.value };
+    });
+    description.addEventListener("input", () => { autosize(description); entry.draft = { ...entry.draft, description: description.value }; });
+    // Enter in the name creates the project once named (Shift+Enter goes on to the description, where Enter starts a
+    // line); Cmd/Ctrl+Enter creates it from either, as in the Create project window.
+    panel.addEventListener("keydown", event => {
+      const target = event.target as HTMLElement;
+      if ((target !== title && target !== description) || event.key !== "Enter" || event.isComposing || event.altKey) return;
+      if (event.metaKey || event.ctrlKey) { event.preventDefault(); if (!event.repeat) void this.createNewProject(entry); }
+      else if (target === title && event.shiftKey) { event.preventDefault(); description.focus(); description.setSelectionRange(description.value.length, description.value.length); }
+      else if (target === title) { event.preventDefault(); if (title.value.trim() && !event.repeat) void this.createNewProject(entry); }
+    });
+    const fit = (): void => { autosize(title); autosize(description); };
+    if (panel.isConnected) fit();
+    (panel.ownerDocument.defaultView ?? window).requestAnimationFrame(fit);
+  }
+
+  /** A new project's property in the popover a project's page opens for it; a choice redraws the new project. */
+  private editNewProject(entry: NewProject, property: keyof ProjectDraft, anchor: HTMLElement): void {
+    const { draft } = entry;
+    openProjectDraftProperty(this.plugin, draft, property, anchor, {
+      status: draft.status ?? "",
+      // Chosen dates are kept as ISO dates, which the note is written from in the vault's format.
+      dates: { date: draft.date || undefined, endDate: draft.endDate || undefined, deadline: draft.deadline || undefined },
+      save: change => {
+        if (this.newProject !== entry) return;
+        entry.draft = change(entry.draft);
+        entry.error = "";
+        entry.version++;
+        this.render();
+      }
+    });
+  }
+
+  /** Writes the new project's note and opens its page, as the Create project window does; a problem shows above the button. */
+  private async createNewProject(entry: NewProject): Promise<void> {
+    if (entry.creating || this.newProject !== entry) return;
+    entry.creating = true;
+    try {
+      const path = await this.plugin.createProjectNote(entry.draft);
+      if (this.newProject === entry) this.newProject = undefined;
+      this.render();
+      await this.plugin.openProject(path);
+    } catch (cause) {
+      entry.error = cause instanceof Error ? cause.message : String(cause);
+      entry.version++;
+      if (this.newProject === entry) this.render();
+    } finally {
+      entry.creating = false;
+    }
   }
 
   /**

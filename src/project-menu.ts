@@ -77,13 +77,31 @@ function confirmDeleteProject(plugin: TaskManagerPlugin, project: Project): void
 
 /** A project property's popover beside `anchor` (the property itself, or a menu row): a date, priority, parent, tags, colour or name. */
 export function openProjectProperty(plugin: TaskManagerPlugin, project: Project, property: keyof ProjectDraft, anchor: HTMLElement, beside = false, done?: () => void): void {
-  const current = plugin.projectDraft(project);
-  const save = (change: (draft: ProjectDraft) => ProjectDraft): void => { done?.(); updateProject(plugin, project, change); };
+  openProjectDraftProperty(plugin, plugin.projectDraft(project), property, anchor, {
+    beside, path: project.path, status: project.status ?? "",
+    dates: { date: project.scheduledDate, endDate: project.endDate, deadline: project.deadline },
+    save: change => { done?.(); updateProject(plugin, project, change); }
+  });
+}
+
+export interface ProjectPropertyOptions {
+  beside?: boolean;
+  /** The project's own note, left out of the parents and tags offered; none for a project still to be created. */
+  path?: string;
+  /** Its status as read ("" for none). */
+  status: string;
+  /** Its dates, as ISO dates. */
+  dates: { date?: string; endDate?: string; deadline?: string };
+  save: (change: (draft: ProjectDraft) => ProjectDraft) => void;
+}
+
+/** A property's popover for a project's draft (`current`): a saved project's (see openProjectProperty), or a new one's. */
+export function openProjectDraftProperty(plugin: TaskManagerPlugin, current: ProjectDraft, property: keyof ProjectDraft, anchor: HTMLElement, options: ProjectPropertyOptions): void {
+  const { beside = false, path, save } = options;
   if (property === "date" || property === "endDate" || property === "deadline") {
     const label = property === "date" ? "Start date" : property === "endDate" ? "End date" : "Deadline";
-    const value = property === "date" ? project.scheduledDate : property === "endDate" ? project.endDate : project.deadline;
     openDatePopover({
-      anchor, beside, kind: "date", label, dateFormat: plugin.dateFormat(), value: { date: value },
+      anchor, beside, kind: "date", label, dateFormat: plugin.dateFormat(), value: { date: options.dates[property] },
       // The note stores dates in the vault's format; the editor reads ISO dates too.
       save: next => save(draft => ({ ...draft, [property]: next.date ?? "" }))
     });
@@ -92,18 +110,18 @@ export function openProjectProperty(plugin: TaskManagerPlugin, project: Project,
   } else if (property === "status") {
     const choices: Choice[] = TASK_STATUSES.map(status => ({ value: status, label: STATUS_LABELS[status], icon: STATUS_ICONS[status] }));
     choices.push({ value: "", label: "No status", separated: true });
-    openChoicePopover({ anchor, beside, label: "Status", choices, cycleKey: "s", selected: project.status ?? "", choose: value => save(draft => ({ ...draft, status: value })) });
+    openChoicePopover({ anchor, beside, label: "Status", choices, cycleKey: "s", selected: options.status, choose: value => save(draft => ({ ...draft, status: value })) });
   } else if (property === "parent") {
     // Not the project itself, nor one of its subprojects: a project cannot sit inside itself.
     const projects = plugin.index.projects();
     const inside = (candidate: Project): boolean => {
-      for (let path: string | undefined = candidate.path, depth = 0; path && depth < 50; depth++) {
-        if (path === project.path) return true;
-        path = projects.find(item => item.path === path)?.parentPath;
+      for (let next: string | undefined = candidate.path, depth = 0; next && depth < 50; depth++) {
+        if (next === path) return true;
+        next = projects.find(item => item.path === next)?.parentPath;
       }
       return false;
     };
-    const choices: Choice[] = activeProjects(projects).filter(item => !inside(item)).sort((a, b) => a.name.localeCompare(b.name))
+    const choices: Choice[] = activeProjects(projects).filter(item => !path || !inside(item)).sort((a, b) => a.name.localeCompare(b.name))
       .map(item => ({ value: item.path, label: item.name, icon: "circle", color: item.color }));
     choices.push({ value: "", label: "No parent", separated: true });
     openChoicePopover({ anchor, beside, label: "Parent project", choices, selected: current.parent, input: { placeholder: "Find a project", filter: true },
@@ -111,10 +129,10 @@ export function openProjectProperty(plugin: TaskManagerPlugin, project: Project,
   } else if (property === "tags") {
     const own = current.tags.split(/[,\s]+/).filter(Boolean);
     // Other projects' tags are the ones to offer.
-    const vault = [...new Set(plugin.index.projects().filter(item => item.path !== project.path)
+    const vault = [...new Set(plugin.index.projects().filter(item => item.path !== path)
       .flatMap(item => plugin.projectDraft(item).tags.split(/[,\s]+/)).filter(tag => tag && !own.includes(tag)))].sort((a, b) => a.localeCompare(b));
     let tags = own;
-    const write = (): void => updateProject(plugin, project, draft => ({ ...draft, tags: tags.join(", ") }));
+    const write = (): void => save(draft => ({ ...draft, tags: tags.join(", ") }));
     openTagsPopover({
       anchor, beside, tags: [...own.map(name => ({ name, state: "all" as const })), ...vault.map(name => ({ name, state: "none" as const }))],
       // Frontmatter tags have no spaces: a typed "open house" becomes "open-house".
@@ -133,7 +151,7 @@ export function openProjectProperty(plugin: TaskManagerPlugin, project: Project,
   } else if (property === "name") {
     openChoicePopover({
       anchor, beside, label: "Rename project", choices: [],
-      input: { placeholder: "Project name", value: project.name, invalid: "", parse: text => text && text !== project.name ? { value: text, label: `Rename to “${text}”` } : undefined },
+      input: { placeholder: "Project name", value: current.name, invalid: "", parse: text => text && text !== current.name ? { value: text, label: `Rename to “${text}”` } : undefined },
       choose: name => save(draft => ({ ...draft, name }))
     });
   }
