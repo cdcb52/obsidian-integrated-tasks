@@ -11,6 +11,8 @@ import type { Task } from "./types";
 
 interface ClosedRecurring { task: Task; outcome: RecurringOutcome }
 const recurringCompletion = StateEffect.define<ClosedRecurring[]>();
+/** Tasks moved in the note as Settings › Completed tasks says. */
+const tasksPlaced = StateEffect.define<null>();
 
 /** Record completion dates on checkbox flips; off unless `enabled` says so. */
 export interface NoteCompletionDates { enabled: () => boolean; linkDates: () => boolean }
@@ -90,6 +92,7 @@ export function noteRecurringCompletion(
             }).map(line => line.number - 1));
             const tasks: ClosedRecurring[] = [];
             const changes: ChangeSpec[] = [];
+            const effects: StateEffect<unknown>[] = [];
             const reverted = new Set<number>();
             const previous = recurringLines.size ? scanTasks(path, transaction.startState.doc.toString(), reference, getDateFormat(), getSectionHeadingLevel())
                 .filter(task => recurringLines.has(task.line)) : [];
@@ -142,15 +145,30 @@ export function noteRecurringCompletion(
                 const lines = placed.map(entry => ({ line: transaction.newDoc.lineAt(transaction.changes.mapPos(entry.line.from)).number - 1, closed: isClosed(entry.after) }))
                     .filter(entry => !nonBody.has(entry.line));
                 const next = lines.length ? placeChangedTasks(path, stamped, lines, { ...moving!, sectionHeadingLevel: getSectionHeadingLevel(), dateFormat: getDateFormat() }) : stamped;
-                if (next !== stamped) changes.splice(0, changes.length, lineChange(0, text, next));
+                if (next !== stamped) {
+                    changes.splice(0, changes.length, lineChange(0, text, next));
+                    effects.push(tasksPlaced.of(null));
+                }
             }
             if (!changes.length) return transaction;
-            return [transaction, { changes, ...(tasks.length ? { effects: recurringCompletion.of(tasks) } : {}), sequential: true }];
+            if (tasks.length) effects.push(recurringCompletion.of(tasks));
+            return [transaction, { changes, effects, sequential: true }];
         }),
         EditorView.updateListener.of(update => {
             const tasks = update.transactions.flatMap(transaction => transaction.effects
                 .filter(effect => effect.is(recurringCompletion)).flatMap(effect => effect.value));
             if (tasks.length) void Promise.resolve().then(() => tasks.forEach(({ task, outcome }) => complete(task, outcome)));
+            if (update.transactions.some(transaction => transaction.effects.some(effect => effect.is(tasksPlaced)))) showCheckboxesAsWritten(update.view);
         })
     ];
+}
+
+/**
+ * A clicked checkbox ticks itself before the note says so. When the task it ticked moves away, the editor keeps the
+ * checkbox for the task that moved up into its place, still ticked: each checkbox shows its line's status again.
+ */
+function showCheckboxesAsWritten(view: EditorView): void {
+    for (const box of Array.from(view.contentDOM.querySelectorAll<HTMLInputElement>("input.task-list-item-checkbox[data-task]"))) {
+        box.checked = box.getAttribute("data-task") !== " ";
+    }
 }
