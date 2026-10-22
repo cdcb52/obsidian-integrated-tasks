@@ -196,7 +196,7 @@ export class TaskMainView extends ItemView {
   get pagePath(): string | undefined { return this.state.pagePath ?? this.state.projectPath; }
 
   /** The Projects view itself (not a project's page), which lists projects in place of tasks. */
-  private get isProjectsView(): boolean { return this.state.mode === "projects" && !this.pagePath; }
+  get isProjectsView(): boolean { return this.state.mode === "projects" && !this.pagePath; }
 
   /**
    * Whether the view lists done and cancelled tasks without a status filter: the Projects view does, and a list or

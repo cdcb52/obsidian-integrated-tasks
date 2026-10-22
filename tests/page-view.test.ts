@@ -852,7 +852,7 @@ it("creates a new task in the open view's context: a task view, a project or tag
   const plugin = new TaskManagerPlugin({} as App, {} as never);
   plugin.settings.taskDetails = "view";
   const newTask = vi.fn();
-  const taskView = Object.assign(Object.create(TaskMainView.prototype) as TaskMainView, { newTask });
+  const taskView = Object.assign(Object.create(TaskMainView.prototype) as TaskMainView, { newTask, state: { mode: "all" } });
   const note = (path: string) => Object.assign(Object.create(MarkdownView.prototype) as MarkdownView, { file: { path } });
   let active: unknown = taskView;
   let recent: unknown = null;
@@ -873,7 +873,11 @@ it("creates a new task in the open view's context: a task view, a project or tag
   for (const path of ["Work.md", "Tags/Errand.md", "Loose.md"]) { active = note(path); plugin.newTask(); }
   active = null;
   plugin.newTask();
+  // The Projects view's Add button makes projects; a new task from there goes to the Inbox.
+  active = Object.assign(Object.create(TaskMainView.prototype) as TaskMainView, { newTask, state: { mode: "projects" } });
+  plugin.newTask();
+  expect(newTask).toHaveBeenCalledTimes(2);
   expect(open.mock.calls.map(([state]) => state)).toEqual([
-    { mode: "all", projectPath: "Work.md" }, { mode: "tags", tag: "Errand", pagePath: "Tags/Errand.md" }, { mode: "inbox" }, { mode: "inbox" }
+    { mode: "all", projectPath: "Work.md" }, { mode: "tags", tag: "Errand", pagePath: "Tags/Errand.md" }, { mode: "inbox" }, { mode: "inbox" }, { mode: "inbox" }
   ]);
 });

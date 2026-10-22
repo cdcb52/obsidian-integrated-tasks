@@ -169,6 +169,7 @@ export default class TaskManagerPlugin extends Plugin {
       this.editCurrentLineTask(checking, editor, view.file) });
     this.addCommand({ id: "edit-task-properties", name: "Open task menu", checkCallback: checking => this.editSelectedTaskProperties(checking) });
     this.addCommand({ id: "new-task", name: "Create new task", callback: () => this.newTask() });
+    this.addCommand({ id: "new-project", name: "Create new project", callback: () => this.openProjectCreator() });
     this.addCommand({ id: "convert-task-tags", name: "Convert task tags to the tag format", callback: () => void this.convertTaskTags() });
     this.addCommand({ id: "insert-task-query", name: "Insert task query", editorCallback: editor => editor.replaceSelection(TASK_QUERY_TEMPLATE) });
     this.addCommand({ id: "import-tasks-plugin", name: "Import tasks from the Tasks plugin", callback: () => this.openTasksImport() });
@@ -853,12 +854,13 @@ export default class TaskManagerPlugin extends Plugin {
   /**
    * A new task in the open view's context: a task view's tag, project or date (as its Add task button, so in the
    * Things style a blank card in the list), or the open note when it is a project or a tag's note; otherwise the
-   * Inbox. With a sidebar focused (such as the task navigation), the context is the last view in the main area.
+   * Inbox, as from the Projects view, whose Add button makes projects. With a sidebar focused (such as the task
+   * navigation), the context is the last view in the main area.
    */
   newTask(): void {
     const workspace = this.app.workspace;
     const view = workspace.getActiveViewOfType(TaskMainView) ?? workspace.getActiveViewOfType(MarkdownView) ?? workspace.getMostRecentLeaf()?.view;
-    if (view instanceof TaskMainView) { view.newTask(); return; }
+    if (view instanceof TaskMainView && !view.isProjectsView) { view.newTask(); return; }
     const path = view instanceof MarkdownView ? view.file?.path : undefined;
     const tag = path ? this.index.tagForPath(path) : undefined;
     const state: OpenEditorState = path && this.index.isProject(path) ? { mode: "all", projectPath: path }
