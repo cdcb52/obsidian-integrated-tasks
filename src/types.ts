@@ -181,6 +181,8 @@ export interface TaskManagerSettings {
   newTaskPosition: "top" | "bottom";
   showUndoNotices: boolean;
   density: "comfortable" | "compact";
+  /** The task sidebar's sections left out of it (its files show by showFiles). */
+  hiddenSidebarSections: SidebarSection[];
   /** List the vault's files and folders in the task sidebar, below its lists. */
   showFiles: boolean;
   /** How the sidebar's file tree orders files, named as the file explorer names its orders. */
@@ -224,6 +226,11 @@ export interface TaskManagerSettings {
   sidebarIdleView: string;
 }
 
+/** The task sidebar's sections, in its order, which settings can leave out: Favorites, the lists (All Tasks with the
+ * smart lists under it), Projects and Tags. */
+export const SIDEBAR_SECTIONS = ["favorites", "inbox", "today", "upcoming", "all", "projects", "tags"] as const;
+export type SidebarSection = typeof SIDEBAR_SECTIONS[number];
+
 export const DEFAULT_SETTINGS: TaskManagerSettings = {
   smartLists: [],
   taskMode: false,
@@ -240,6 +247,7 @@ export const DEFAULT_SETTINGS: TaskManagerSettings = {
   newTaskPosition: "top",
   showUndoNotices: false,
   density: "compact",
+  hiddenSidebarSections: [],
   showFiles: true,
   fileSortOrder: "alphabetical",
   customFileOrder: false,

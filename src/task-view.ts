@@ -438,6 +438,26 @@ export class TaskMainView extends ItemView {
 
   private get content(): HTMLElement { return this.containerEl?.children[1] as HTMLElement; }
 
+  /** The tab made active with focus (a list opened from the task sidebar, say): focus goes into it, as into a note's editor. */
+  setEphemeralState(state: unknown): void {
+    super.setEphemeralState(state);
+    if ((state as { focus?: unknown } | null)?.focus) this.focusContent();
+  }
+
+  /**
+   * Focuses the row in the tab order (the first, unless another was), from which the arrow keys go on, or the view
+   * itself when it has none. Focus already in the view stays where it is.
+   */
+  private focusContent(): void {
+    const content = this.content;
+    if (!content || content.contains(content.ownerDocument.activeElement)) return;
+    const row = this.rovingRow?.isConnected ? this.rovingRow : this.rowElements()[0];
+    row?.focus({ preventScroll: true });
+    if (row && content.ownerDocument.activeElement === row) return;
+    content.tabIndex = -1;
+    content.focus({ preventScroll: true });
+  }
+
   /** Coalesce bursts of index updates into one refresh per frame. */
   private scheduleRender(): void {
     // A row dragged in the list stays under the pointer: the list redraws once the drag ends.

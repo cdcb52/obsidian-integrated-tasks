@@ -49,9 +49,10 @@ import { TaskManagerSettingTab } from "../src/settings";
 function setup() {
   rows.length = 0;
   const plugin = {
-    settings: { dateFormat: "", taskMode: false, linkDates: true, inboxPath: "Tasks.md", newTaskPosition: "top" },
+    settings: { dateFormat: "", taskMode: false, linkDates: true, inboxPath: "Tasks.md", newTaskPosition: "top", hiddenSidebarSections: [] as string[], showFiles: true },
     saveSettings: vi.fn().mockResolvedValue(undefined),
     refreshViews: vi.fn(),
+    refreshNavigation: vi.fn(),
     setDateFormat: vi.fn().mockResolvedValue(undefined),
     updateTaskDates: vi.fn().mockResolvedValue(undefined),
     setTaskMode: vi.fn().mockResolvedValue(undefined),
@@ -69,7 +70,8 @@ describe("settings compatibility", () => {
       ["General", ["Inbox note", "New project location", "Move converted notes to the project location", "New task position", "Section heading level", "Task mode", "Show undo notices"]],
       ["How tasks are written", ["Date format", "Link dates", "Update dates", "Tag format", "Record completion dates"]],
       ["Ignored tasks", ["Ignored folders and notes", "Ignored tags", "Ignore tasks in code blocks"]],
-      ["Appearance", ["Style", "Task details", "Density", "Show files in sidebar", "Show subtasks in task views"]],
+      ["Appearance", ["Style", "Task details", "Density", "Show subtasks in task views"]],
+      ["Task sidebar", ["Favorites", "Inbox", "Today", "Upcoming", "All tasks", "Projects", "Tags", "Files"]],
       ["Calendar", ["Color calendar tasks by project", "Color calendar checkboxes by priority"]],
       ["Import", ["Import from the Tasks plugin"]]
     ]);
@@ -180,3 +182,20 @@ describe("settings compatibility", () => {
     await update.click!();
     expect(update.disabled).toBe(false);
  });
+
+it("leaves the task sidebar's sections out, and puts them back, from a toggle each", async () => {
+  const { tab, plugin } = setup();
+  tab.display();
+  const toggle = (name: string) => rows.find(row => row.name === name && !row.heading)!;
+  expect(["Favorites", "Inbox", "Today", "Upcoming", "All tasks", "Projects", "Tags", "Files"].map(name => toggle(name).value)).toEqual(Array(8).fill(true));
+  await toggle("Projects").change!(false);
+  await toggle("Favorites").change!(false);
+  expect(plugin.settings.hiddenSidebarSections).toEqual(["projects", "favorites"]);
+  await toggle("Projects").change!(true);
+  expect(plugin.settings.hiddenSidebarSections).toEqual(["favorites"]);
+  // Files is Show files.
+  await toggle("Files").change!(false);
+  expect(plugin.settings.showFiles).toBe(false);
+  expect(plugin.saveSettings).toHaveBeenCalledTimes(4);
+  expect(plugin.refreshNavigation).toHaveBeenCalledTimes(4);
+});

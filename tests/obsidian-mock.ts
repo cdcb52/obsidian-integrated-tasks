@@ -45,6 +45,7 @@ export class ItemView {
   register(): void {}
   getState(): Record<string, unknown> { return {}; }
   async setState(): Promise<void> {}
+  setEphemeralState(_state: unknown): void {}
 }
 
 // A note open in the editor: its file, its mode, and an editor with its lines and selections.

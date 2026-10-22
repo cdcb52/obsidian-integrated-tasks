@@ -1,12 +1,13 @@
 import { parseIgnoreList } from "./ignore";
 import { Notice, PluginSettingTab, Setting, type App, type SettingDefinitionRender } from "obsidian";
 import type TaskManagerPlugin from "./main";
+import type { SidebarSection } from "./types";
 
 /**
  * The settings page's groups, in order: where tasks go, how they are written in notes, which are left out, how views
- * look, the calendar's colors, and the Tasks plugin import.
+ * look, what the task sidebar lists, the calendar's colors, and the Tasks plugin import.
  */
-export const SETTING_GROUPS = ["General", "How tasks are written", "Ignored tasks", "Appearance", "Calendar", "Import"] as const;
+export const SETTING_GROUPS = ["General", "How tasks are written", "Ignored tasks", "Appearance", "Task sidebar", "Calendar", "Import"] as const;
 type SettingGroup = typeof SETTING_GROUPS[number];
 
 /** Text settings apply once typing pauses, so each keystroke does not save and re-index the vault. */
@@ -244,22 +245,40 @@ export class TaskManagerSettingTab extends PluginSettingTab {
       },
       {
         section: "Appearance",
-        name: "Show files in sidebar",
-        desc: "List the vault's files and folders in the task sidebar, below projects and tags, so you can open notes without switching to the file explorer.",
-        render: (setting: Setting) => { setting.addToggle(toggle => toggle.setValue(this.plugin.settings.showFiles).onChange(async value => {
-          this.plugin.settings.showFiles = value;
-          await this.plugin.saveSettings();
-          this.plugin.refreshNavigation();
-        })); }
-      },
-      {
-        section: "Appearance",
         name: "Show subtasks in task views",
         desc: "In the Things style, list subtasks as their own rows under their task. When off, they appear in the task's card, and a subtask shows on its own only in views its task is not in. The Griply style always lists them.",
         render: (setting: Setting) => { setting.addToggle(toggle => toggle.setValue(this.plugin.settings.showSubtasks).onChange(async value => {
           this.plugin.settings.showSubtasks = value;
           await this.plugin.saveSettings();
           this.plugin.refreshViews();
+        })); }
+      },
+      // Each of the task sidebar's sections can be left out of it.
+      ...([
+        ["favorites", "Favorites", "Show Favorites at the top: anything you add from its right-click menu, or drag in."],
+        ["inbox", "Inbox", "Show the Inbox list."],
+        ["today", "Today", "Show the Today list."],
+        ["upcoming", "Upcoming", "Show the Upcoming list."],
+        ["all", "All tasks", "Show the All Tasks list, with your smart lists under it."],
+        ["projects", "Projects", "Show the Projects heading, which opens the Projects view, with your projects under it."],
+        ["tags", "Tags", "Show the Tags heading with your tags under it."]
+      ] as const satisfies ReadonlyArray<readonly [SidebarSection, string, string]>).map(([section, name, desc]) => ({
+        section: "Task sidebar" as const, name, desc,
+        render: (setting: Setting) => { setting.addToggle(toggle => toggle.setValue(!this.plugin.settings.hiddenSidebarSections.includes(section)).onChange(async value => {
+          const hidden = this.plugin.settings.hiddenSidebarSections.filter(item => item !== section);
+          this.plugin.settings.hiddenSidebarSections = value ? hidden : [...hidden, section];
+          await this.plugin.saveSettings();
+          this.plugin.refreshNavigation();
+        })); }
+      })),
+      {
+        section: "Task sidebar",
+        name: "Files",
+        desc: "List the vault's files and folders below the other sections, so you can open notes without switching to the file explorer.",
+        render: (setting: Setting) => { setting.addToggle(toggle => toggle.setValue(this.plugin.settings.showFiles).onChange(async value => {
+          this.plugin.settings.showFiles = value;
+          await this.plugin.saveSettings();
+          this.plugin.refreshNavigation();
         })); }
       },
       // The calendar can color its tasks.

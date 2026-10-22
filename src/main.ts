@@ -30,14 +30,14 @@ import { TaskStore, type TaskChange } from "./task-store";
 import { TasksImportModal } from "./tasks-import-modal";
 import { TASK_QUERY_LANGUAGE, TASK_QUERY_TEMPLATE, TaskQueryBlock } from "./task-query-block";
 import { TaskMainView, TASK_MAIN_VIEW, tasksOpenInSidebar } from "./task-view";
-import { DEFAULT_SETTINGS, type Project, type SavedViewOptions, type SmartList, type ViewLayout, type ViewPeriod, type Task, type TaskDraft, type TaskManagerSettings, type TaskViewMode, type TaskViewState } from "./types";
+import { DEFAULT_SETTINGS, SIDEBAR_SECTIONS, type Project, type SavedViewOptions, type SmartList, type ViewLayout, type ViewPeriod, type Task, type TaskDraft, type TaskManagerSettings, type TaskViewMode, type TaskViewState } from "./types";
 import { TaskManagerSettingTab } from "./settings";
 import { addProjectProperties, setProjectDescription } from "./project-properties";
 import { dailyNoteDateFormat } from "./daily-notes";
 import { TaskQuickSwitcher } from "./quick-switcher";
 import { openProjectMenu as showProjectMenu } from "./project-menu";
 import { forgetSidebarPaths, navOrderFrom, renameSidebarPaths } from "./sidebar-order";
-import { leafFor } from "./leaves";
+import { leafFor, openFileIn } from "./leaves";
 import { TaskSidebarView, TASK_SIDEBAR_VIEW } from "./task-sidebar";
 
 const LEGACY_SETTINGS = ["taskListRowHeight", "taskListRowHeightMultiplier", "hiddenListTaskProperties", "hiddenKanbanTaskProperties", "tasksHeading", "taskDeadlineDisplay", "linkTags", "taskHoverHighlight", "wrapTaskTitles", "wrapCalendarTaskTitles", "wrapKanbanTaskTitles", "showSubtaskCounts", "showGroupTaskCounts", "weeklyReview"];
@@ -349,6 +349,8 @@ export default class TaskManagerPlugin extends Plugin {
     this.settings.density = this.settings.density === "comfortable" ? "comfortable" : "compact";
     // Files show by default; only an explicit Off hides them.
     this.settings.showFiles = this.settings.showFiles !== false;
+    const hiddenSections: unknown = this.settings.hiddenSidebarSections;
+    this.settings.hiddenSidebarSections = Array.isArray(hiddenSections) ? SIDEBAR_SECTIONS.filter(section => hiddenSections.includes(section)) : [];
     if (!["alphabetical", "alphabeticalReverse", "byModifiedTime", "byModifiedTimeReverse", "byCreatedTime", "byCreatedTimeReverse"].includes(this.settings.fileSortOrder)) this.settings.fileSortOrder = "alphabetical";
     this.settings.customFileOrder = this.settings.customFileOrder === true;
     const favorites: unknown = this.settings.favorites;
@@ -648,8 +650,7 @@ export default class TaskManagerPlugin extends Plugin {
   async openProject(path: string, { keepTaskMode = false, newLeaf = "tab" }: { keepTaskMode?: boolean; newLeaf?: PaneType | boolean } = {}): Promise<void> {
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!(file instanceof TFile)) throw new Error("Project note no longer exists.");
-    const leaf = leafFor(this.app, newLeaf);
-    await leaf.openFile(file);
+    const leaf = await openFileIn(this.app, file, newLeaf);
     if (!this.settings.taskMode && !keepTaskMode) await this.setTaskMode(true);
     else await this.taskModeController?.sync();
     await this.app.workspace.revealLeaf(leaf);
@@ -662,8 +663,7 @@ export default class TaskManagerPlugin extends Plugin {
   async openTag(tag: string, { keepTaskMode = false, newLeaf }: { keepTaskMode?: boolean; newLeaf?: PaneType | boolean } = {}): Promise<void> {
     const file = this.index.tagFile(tag);
     if (!file) return this.openTaskView({ mode: "tags", tag }, { newLeaf });
-    const leaf = leafFor(this.app, newLeaf ?? "tab");
-    await leaf.openFile(file);
+    const leaf = await openFileIn(this.app, file, newLeaf ?? "tab");
     if (!this.settings.taskMode && !keepTaskMode) await this.setTaskMode(true);
     else await this.taskModeController?.sync();
     await this.app.workspace.revealLeaf(leaf);

@@ -6,7 +6,7 @@ import { activeProjects, renderProjectProgress } from "./project-progress";
 import { projectHierarchy } from "./project-hierarchy";
 import { activeTaskDrag, highlightDropTarget, markDropTarget, TASK_DRAG_TYPE, type SidebarDrop } from "./sidebar-drop";
 import { inOrder, moveKey } from "./sidebar-order";
-import { leafFor } from "./leaves";
+import { leafFor, openFileIn } from "./leaves";
 import { NavDragController, SIDE_HYSTERESIS_PX, type NavDrag, type NavGap, type NavIntent, type Point } from "./navigation-drag";
 
 export const TASK_NAV_VIEW = "task-manager-navigation";
@@ -150,7 +150,8 @@ function draggedFiles(draggable: Draggable | null): Array<TFile | TFolder> {
 }
 
 export class TaskNavigationView extends ItemView {
-  private activeMode: TaskViewMode = "today";
+  /** The list open in front; none while a note is (one that is no project's or tag's). */
+  private activeMode?: TaskViewMode = "today";
   private activeTag?: string;
   private activeSmartList?: string;
   private activeProject?: string;
@@ -232,7 +233,7 @@ export class TaskNavigationView extends ItemView {
       this.scheduleSettledRender();
     });
     const syncActive = (): void => {
-      if (this.plugin.settings.showFiles || this.labels.some(entry => entry.key.startsWith("file:"))) this.markActiveFile();
+      this.markActiveFile();
       this.followActiveView();
     };
     // Only a tab in the main area changes what is open; the sidebar itself (or another) becoming active changes nothing.
@@ -321,10 +322,23 @@ export class TaskNavigationView extends ItemView {
 
   /** The open file changed: its rows are marked, without drawing the list again. */
   private markActiveFile(): void {
-    const path = this.app.workspace.getActiveFile?.()?.path;
+    const path = this.openFilePath();
     if (path === this.activeFile) return;
     this.activeFile = path;
     this.markActive();
+  }
+
+  /**
+   * The open file: the note a task page in front shows (a project's or tag's), or else Obsidian's active file, which
+   * while the sidebar is active is the main area's last active one.
+   */
+  private openFilePath(): string | undefined {
+    const front = this.app.workspace.getMostRecentLeaf?.(this.app.workspace.rootSplit)?.view;
+    if (front?.getViewType() === "task-manager-main") {
+      const page = front.getState().pagePath;
+      return typeof page === "string" ? page : undefined;
+    }
+    return this.app.workspace.getActiveFile?.()?.path;
   }
 
   /** Whether the row with `key` (as data-tm-nav-key has it, in Favorites too) shows what is open. */
@@ -341,10 +355,14 @@ export class TaskNavigationView extends ItemView {
     return false;
   }
 
-  /** Marks what the task tab in front lists, when another tab comes to the front or Back and Forward change what it lists. */
+  /**
+   * Marks what the tab in front shows, when another tab comes to the front or Back and Forward change it: what a task
+   * tab lists, or for a note, its project or tag if it is one's (else no list).
+   */
   followActiveView(): void {
     const view = this.app.workspace.getActiveViewOfType(ItemView);
-    if (view?.getViewType() !== "task-manager-main") return;
+    if (!view || view === this) return;
+    if (view.getViewType() !== "task-manager-main") { this.followFile(this.app.workspace.getActiveFile?.()?.path); return; }
     const state = view.getState();
     const text = (value: unknown): string | undefined => typeof value === "string" ? value : undefined;
     const mode = NAV_MODES.has(state.mode as TaskViewMode) ? state.mode as TaskViewMode : state.mode === "smartLists" ? "smartLists" : undefined;
@@ -355,6 +373,17 @@ export class TaskNavigationView extends ItemView {
     if (mode === this.activeMode && tag === this.activeTag && project === this.activeProject && smartList === this.activeSmartList) return;
     if (mode === "smartLists") this.setActive(mode, undefined, undefined, smartList);
     else this.setActive(mode, tag, project);
+  }
+
+  /** A note (or another file) in front: its project or tag is marked when it is one's note; otherwise no list is. */
+  private followFile(path: string | undefined): void {
+    const index = this.plugin.index;
+    const tag = path && !index.isProject(path) ? index.tagForPath(path) : undefined;
+    const [mode, project] = path && index.isProject(path) ? ["projects", path] as const : tag ? ["tags", undefined] as const : [undefined, undefined];
+    if (mode === this.activeMode && tag === this.activeTag && project === this.activeProject && !this.activeSmartList) return;
+    if (mode) { this.setActive(mode, tag, project); return; }
+    this.activeMode = this.activeTag = this.activeProject = this.activeSmartList = undefined;
+    this.markActive();
   }
 
   /** Redraws the list now, or (`soon`) in the next frame, along with anything else that changed by then. */
@@ -502,14 +531,18 @@ export class TaskNavigationView extends ItemView {
     this.listEl = nav;
     if (this.settings.showFiles || this.settings.favorites?.some(key => /^(file|folder):/.test(key))) {
       this.watchFiles();
-      this.activeFile = this.app.workspace.getActiveFile()?.path;
+      this.activeFile = this.openFilePath();
     }
     // Files and folders dragged in from the file explorer drop anywhere in the list, through Obsidian's drag manager.
     this.externalDrop(nav);
-    this.renderFavorites(nav);
+    // Settings can leave sections out (Files by Show files).
+    const hidden = new Set<string>(this.settings.hiddenSidebarSections ?? []);
+    if (!hidden.has("favorites")) this.renderFavorites(nav);
     for (const group of NAV_GROUPS) {
+      const entries = group.filter(entry => !hidden.has(entry.mode));
+      if (!entries.length) continue;
       const lists = nav.createDiv({ cls: "tm-nav-group" });
-      for (const entry of group) {
+      for (const entry of entries) {
         const row = this.listRow(lists, entry.mode, `mode:${entry.mode}`);
         // The lists keep their places; they drag only into Favorites.
         this.draggable(row, { kind: "list", mode: entry.mode }, `mode:${entry.mode}`);
@@ -528,6 +561,7 @@ export class TaskNavigationView extends ItemView {
     }
 
     for (const { section, label, icon, open } of NAV_SECTIONS) {
+      if (hidden.has(section)) continue;
       const group = nav.createDiv({ cls: "tree-item nav-folder tm-nav-group tm-nav-section" });
       const heading = open
         ? this.item(group, `mode:${open}`, label, this.listActive(open), event => this.plugin.openTaskView({ mode: open }, { newLeaf: Keymap.isModEvent(event) }), { icon, color: "section" })
@@ -1101,7 +1135,7 @@ export class TaskNavigationView extends ItemView {
     const row = file instanceof TFolder
       ? this.item(parent, key, file.name, false, () => { toggle(); this.render(); }, { icon: open ? "folder-open" : "folder", color: "muted", expanded: open })
       : this.item(parent, key, file.basename, file.path === this.activeFile,
-        event => leafFor(this.app, Keymap.isModEvent(event)).openFile(file), { icon: FILE_ICONS[file.extension.toLowerCase()] ?? "file", color: "muted" });
+        event => openFileIn(this.app, file, Keymap.isModEvent(event)), { icon: FILE_ICONS[file.extension.toLowerCase()] ?? "file", color: "muted" });
     row.addClass(isFolder ? "tm-nav-folder" : "tm-nav-file");
     row.style.setProperty("--tm-nav-depth", String(depth));
     row.addEventListener("contextmenu", event => this.openFileMenu(event, file, scope));

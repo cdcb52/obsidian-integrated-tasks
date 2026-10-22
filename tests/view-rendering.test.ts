@@ -143,6 +143,35 @@ describe("paged task lists", () => {
   });
 });
 
+describe("focus", () => {
+  it("takes focus into the list when its tab comes to the front with focus, keeping focus already in it", async () => {
+    const { view, content } = await setup([note("A.md", 3)]);
+    await view.setState({ mode: "all" });
+    const outside = document.body.createEl("button");
+    outside.focus();
+    // As Obsidian does for the tab it makes active (a list opened from the task sidebar, say).
+    view.setEphemeralState({ focus: true });
+    expect(document.activeElement).toBe(rows(content())[0]);
+    // Focus already in the view stays where it is.
+    const checkbox = rows(content())[2].querySelector<HTMLInputElement>("[data-tm-focus-key=checkbox]")!;
+    checkbox.focus();
+    view.setEphemeralState({ focus: true });
+    expect(document.activeElement).toBe(checkbox);
+    // Coming back, it goes to the row last in the tab order; without focus asked for, nothing moves.
+    outside.focus();
+    view.setEphemeralState({});
+    expect(document.activeElement).toBe(outside);
+    view.setEphemeralState({ focus: true });
+    expect(document.activeElement).toBe(rows(content())[2]);
+    // A view with no rows takes focus itself.
+    await view.setState({ mode: "inbox" });
+    expect(rows(content())).toHaveLength(0);
+    outside.focus();
+    view.setEphemeralState({ focus: true });
+    expect(document.activeElement).toBe(content());
+  });
+});
+
 describe("re-rendering", () => {
   it("restores focus to the same control and keeps scroll position", async () => {
     const { view, internals, content } = await setup([note("A.md", 30)]);

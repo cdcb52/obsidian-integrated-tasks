@@ -423,13 +423,17 @@ it("opens a project from the task sidebar in the tab in front unless it is pinne
   plugin.app = { vault: { getAbstractFileByPath: () => file }, workspace: { getLeavesOfType: () => [], getLeaf, getMostRecentLeaf: () => front, rootSplit: {}, revealLeaf: vi.fn() } } as unknown as App;
   (plugin as unknown as { taskModeController: unknown }).taskModeController = { sync: vi.fn() };
   await plugin.openProject(file.path, { keepTaskMode: true, newLeaf: false });
-  expect(front.openFile).toHaveBeenCalledExactlyOnceWith(file);
+  // The tab becomes the active one, with focus, as when the file explorer opens a note.
+  expect(front.openFile).toHaveBeenCalledExactlyOnceWith(file, { active: true });
   expect(getLeaf).not.toHaveBeenCalled();
   pinned = true;
   await plugin.openProject(file.path, { keepTaskMode: true, newLeaf: false });
   expect(getLeaf).toHaveBeenLastCalledWith(false);
+  expect(fresh.openFile).toHaveBeenLastCalledWith(file, { active: true });
+  // A new tab comes to the front as Obsidian's Always focus new tabs says.
   await plugin.openProject(file.path, { keepTaskMode: true, newLeaf: "tab" });
   expect(getLeaf).toHaveBeenLastCalledWith("tab");
+  expect(fresh.openFile).toHaveBeenLastCalledWith(file);
   expect(front.openFile).toHaveBeenCalledOnce();
 });
 

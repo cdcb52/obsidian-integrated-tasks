@@ -84,7 +84,7 @@ Today and Upcoming use a task's scheduled date or its deadline, whichever comes 
 
 Press **Cmd/Ctrl+K** in a task view (or run **Quick switch to view, project, tag, or task**) to jump to any view, project, tag, smart list or open task by typing its name.
 
-The task sidebar lists these views with your smart lists, projects, tags and, with **Show files in sidebar**, your vault's files. Drag anything in it onto **Favorites** at the top, or right-click it and choose **Add to favorites**, to keep it there. Drag items to put them in your own order under their heading, files and folders too; the file tree then follows **Custom order** under **Change sort order**. Drag a project right to put it under the project above, or left to take it out, as you would a task. Click the **Tags** heading to fold your tags away.
+The task sidebar lists these views with your smart lists, projects, tags and your vault's files; choose which of these it shows under **Task sidebar** in settings. Anything you open from it comes to the front with focus, ready for the keyboard. Drag anything in it onto **Favorites** at the top, or right-click it and choose **Add to favorites**, to keep it there. Drag items to put them in your own order under their heading, files and folders too; the file tree then follows **Custom order** under **Change sort order**. Drag a project right to put it under the project above, or left to take it out, as you would a task. Click the **Tags** heading to fold your tags away.
 
 ### Filter, sort and group
 
@@ -307,7 +307,7 @@ Choose between two **Styles** in settings: **Griply** (the default, shown above)
 | **Ignored folders and notes**, **Ignored tags** | Leave out templates, archives or private notes |
 | **Ignore tasks in code blocks** | Leave out checklist items inside fenced code blocks (on by default) |
 | **Style**, **Task details**, **Density** | How lists look and where tasks open |
-| **Show files in sidebar** | Keep your vault's files and folders in the task sidebar |
+| **Task sidebar** | Choose what the task sidebar shows: Favorites, each list, Projects, Tags and your vault's files |
 | **Show subtasks in task views** | In the Things style, list subtasks as their own rows |
 | **Color calendar tasks by project**, **Color calendar checkboxes by priority** | Tint calendar tasks with their project's colour, and checkboxes with their priority |
 

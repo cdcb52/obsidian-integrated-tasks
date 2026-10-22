@@ -10,6 +10,9 @@
   color: var(--text-normal);
 }
 
+/* A view with no rows takes focus itself when its tab comes to the front; like a note's page, it shows no ring. */
+.tm-main-view:focus { outline: none; }
+
 .tm-navigation {
   padding: var(--size-4-3) var(--size-4-2);
 }

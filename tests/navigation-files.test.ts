@@ -147,7 +147,8 @@ it("opens folders in place, remembers them, and opens files (in a new tab with t
   Object.assign(app.workspace, { getMostRecentLeaf: () => front, rootSplit: {} });
   (row("file:Work/Plan.md").querySelector(".tm-nav-label") as HTMLElement).click();
   await Promise.resolve();
-  expect(front.openFile).toHaveBeenCalledExactlyOnceWith(work.children[0]);
+  // Its tab becomes the active one, with focus in it, so the sidebar hands over to it.
+  expect(front.openFile).toHaveBeenCalledExactlyOnceWith(work.children[0], { active: true });
   expect(getLeaf).toHaveBeenCalledOnce();
   // The open folders come back with the sidebar.
   const next = setup();
@@ -453,6 +454,56 @@ it("marks the open file in place, and counts open tasks and draws icons once unt
   expect(new Set(drawn).size).toBe(drawn.length);
   expect(row("file:Notes 2.md").querySelector(".svg-file-text")).not.toBeNull();
   await view.onClose();
+});
+
+it("marks only what the tab in front shows: a note unmarks the list, and a task page marks its note's file too", async () => {
+  const { view, settings, row, app, plugin, workspaceEvents } = setup();
+  settings.showFiles = true;
+  Object.assign(plugin.index, { isProject: (path: string) => path === "Work/Plan.md", tagForPath: (path: string) => path === "Notes 10.md" ? "reading" : undefined });
+  let active: unknown = { getViewType: () => "task-manager-main", getState: () => ({ mode: "today" }) };
+  Object.assign(app.workspace, { getActiveViewOfType: () => active });
+  const front = (): void => workspaceEvents.get("active-leaf-change")!(null);
+  await view.onOpen();
+  expect(row("mode:today").classList.contains("is-active")).toBe(true);
+  // A note in front: its file is marked, and no list is.
+  active = { getViewType: () => "markdown", getState: () => ({}) };
+  app.workspace.getActiveFile.mockReturnValue(app.vault.getAbstractFileByPath("Notes 2.md") as TFile);
+  front();
+  expect(row("mode:today").classList.contains("is-active")).toBe(false);
+  expect(row("file:Notes 2.md").classList.contains("is-active")).toBe(true);
+  // A project's or a tag's note marks the project or tag.
+  const setActive = vi.spyOn(view, "setActive");
+  app.workspace.getActiveFile.mockReturnValue(app.vault.getAbstractFileByPath("Work/Plan.md") as TFile);
+  front();
+  expect(setActive).toHaveBeenLastCalledWith("projects", undefined, "Work/Plan.md");
+  app.workspace.getActiveFile.mockReturnValue(app.vault.getAbstractFileByPath("Notes 10.md") as TFile);
+  front();
+  expect(setActive).toHaveBeenLastCalledWith("tags", "reading", undefined);
+  // A task page in front (a note in task mode), for which Obsidian has no active file, marks its note's row.
+  const page = { getViewType: () => "task-manager-main", getState: () => ({ mode: "all", pagePath: "Notes 2.md" }) };
+  active = page;
+  Object.assign(app.workspace, { getMostRecentLeaf: () => ({ view: page }) });
+  app.workspace.getActiveFile.mockReturnValue(null);
+  front();
+  expect([row("file:Notes 2.md").classList.contains("is-active"), row("file:Notes 10.md").classList.contains("is-active")]).toEqual([true, false]);
+  await view.onClose();
+});
+
+it("leaves out the sections settings hide, and a group of lists left with none", () => {
+  const { view, settings, container } = setup();
+  settings.showFiles = true;
+  const headings = () => Array.from(container.querySelectorAll(".tm-nav-label")).map(label => label.getAttribute("data-tm-nav-key")!)
+    .filter(key => !key.includes(":") || key.startsWith("mode:"));
+  view.refresh();
+  expect(headings()).toEqual(["favorites", "mode:inbox", "mode:today", "mode:upcoming", "mode:all", "mode:projects", "tags", "files"]);
+  settings.hiddenSidebarSections = ["favorites", "inbox", "upcoming", "tags"];
+  view.refresh();
+  expect(headings()).toEqual(["mode:today", "mode:all", "mode:projects", "files"]);
+  settings.hiddenSidebarSections = ["today", "upcoming", "all", "projects"];
+  settings.showFiles = false;
+  view.refresh();
+  expect(headings()).toEqual(["favorites", "mode:inbox", "tags"]);
+  expect(container.querySelectorAll(".tm-nav-group:not(.tm-nav-section)")).toHaveLength(1);
 });
 
 const container = (view: TaskNavigationView) => view.containerEl.children[1] as HTMLElement;
