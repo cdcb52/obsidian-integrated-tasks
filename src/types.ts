@@ -209,7 +209,7 @@ export interface TaskManagerSettings {
   completedPlacement: import("./completed-placement").CompletedPlacement;
   /** The heading completed tasks move under with completedPlacement "section", at the section heading level. */
   completedSection: string;
-  /** How a group of a note's tasks is named: by its path in the vault ("Folder/Note"), or by the note's name alone. */
+  /** How a group of a note's tasks is named: by the note's name alone, or by its path in the vault ("Folder/Note"). */
   noteGroupLabel: "path" | "name";
   /** Projects whose description card is folded on their page. */
   foldedDescriptions: string[];
@@ -265,8 +265,8 @@ export const DEFAULT_SETTINGS: TaskManagerSettings = {
   taskDetails: "sidebar",
   completionDates: true,
   completedPlacement: "keep",
-  completedSection: "Task Logs",
-  noteGroupLabel: "path",
+  completedSection: "Task Log",
+  noteGroupLabel: "name",
   foldedDescriptions: [],
   viewOptions: {},
   viewLayouts: {},

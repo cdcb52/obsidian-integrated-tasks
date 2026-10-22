@@ -141,12 +141,12 @@ describe("task query blocks", () => {
     expect(plugin.openTaskView).toHaveBeenCalledWith({ mode: "all" });
   });
 
-  it("names a note's group by its path, or by its name alone, as Settings › Note group names say", async () => {
+  it("names a note's group by its name alone, or by its path, as Settings › Note group names say", async () => {
     const { render, plugin } = await setup({ "Work/Clients/Acme.md": "- [ ] Call", "Home.md": "- [ ] Sweep" });
     const groups = () => Array.from(render("view: all\ngroup: source").element.querySelectorAll(".tm-query-group")).map(group => group.textContent);
-    expect(groups()).toEqual(["Home", "Work/Clients/Acme"]);
-    plugin.settings.noteGroupLabel = "name";
     expect(groups()).toEqual(["Home", "Acme"]);
+    plugin.settings.noteGroupLabel = "path";
+    expect(groups()).toEqual(["Home", "Work/Clients/Acme"]);
   });
 
   it("shows this note's tasks, an empty message, and readable errors", async () => {

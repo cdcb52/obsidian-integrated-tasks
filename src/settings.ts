@@ -119,7 +119,7 @@ export class TaskManagerSettingTab extends PluginSettingTab {
       {
         section: "General",
         name: "Completed tasks section",
-        desc: "The heading completed tasks move under when Completed tasks is set to the section, such as Task Logs. It is added at the end of the note when missing, at the section heading level, with a heading below it for each section the tasks came from.",
+        desc: "The heading completed tasks move under when Completed tasks is set to the section, such as Task Log. It is added at the end of the note when missing, at the section heading level, with a heading below it for each section the tasks came from.",
         render: (setting: Setting) => { setting.addText(text => text
           .setPlaceholder(DEFAULT_COMPLETED_SECTION)
           .setValue(this.plugin.settings.completedSection)
@@ -273,12 +273,12 @@ export class TaskManagerSettingTab extends PluginSettingTab {
       {
         section: "Appearance",
         name: "Note group names",
-        desc: "When tasks are grouped by note, name each group by the note's full path, such as Projects/Website/Launch, or by the note's name alone, such as Launch.",
+        desc: "When tasks are grouped by note, name each group by the note's name alone, such as Launch, or by its full path, such as Projects/Website/Launch.",
         render: (setting: Setting) => { setting.addDropdown(dropdown => dropdown
-          .addOption("path", "Full path").addOption("name", "Note name only")
+          .addOption("name", "Note name only").addOption("path", "Full path")
           .setValue(this.plugin.settings.noteGroupLabel)
           .onChange(async value => {
-            this.plugin.settings.noteGroupLabel = value === "name" ? "name" : "path";
+            this.plugin.settings.noteGroupLabel = value === "path" ? "path" : "name";
             await this.plugin.saveSettings();
             this.plugin.refreshViews();
           })); }

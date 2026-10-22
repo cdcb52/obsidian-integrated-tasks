@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { placeChangedTasks, type PlacementOptions } from "../src/completed-placement";
 import { completedSectionName } from "../src/structure";
 
-const place = (content: string[], changes: Array<[number, boolean]>, placement: PlacementOptions["placement"], section = "Task Logs", sectionHeadingLevel = 1) =>
+const place = (content: string[], changes: Array<[number, boolean]>, placement: PlacementOptions["placement"], section = "Task Log", sectionHeadingLevel = 1) =>
   placeChangedTasks("Note.md", content.join("\n"), changes.map(([line, closed]) => ({ line, closed })), { placement, section, sectionHeadingLevel }).split("\n");
 
 describe("completed tasks kept in place", () => {
@@ -48,41 +48,41 @@ describe("completed tasks moved to a section", () => {
   it("adds the section at the end of the note, with a heading for the section the task came from", () => {
     const note = ["---", "status: Active", "---", "# Heading 1", "- [x] Done", "- [ ] Open", "", "# Heading 2", "- [ ] Later", ""];
     expect(place(note, [[4, true]], "section")).toEqual(["---", "status: Active", "---", "# Heading 1", "- [ ] Open", "", "# Heading 2", "- [ ] Later",
-      "", "# Task Logs", "", "## Heading 1", "- [x] Done", ""]);
+      "", "# Task Log", "", "## Heading 1", "- [x] Done", ""]);
   });
 
   it("puts a task with no section right under the section's heading, before the headings for sections", () => {
     const note = ["- [x] Loose", "# A", "- [x] Sectioned", "- [ ] Open"];
-    expect(place(note, [[0, true], [2, true]], "section")).toEqual(["# A", "- [ ] Open", "", "# Task Logs", "- [x] Loose", "", "## A", "- [x] Sectioned"]);
+    expect(place(note, [[0, true], [2, true]], "section")).toEqual(["# A", "- [ ] Open", "", "# Task Log", "- [x] Loose", "", "## A", "- [x] Sectioned"]);
   });
 
   it("adds to the existing section and headings, below what they hold", () => {
-    const note = ["# A", "- [x] New", "- [ ] Open", "# Task Logs", "", "## A", "- [x] Old", "", "## B", "- [x] Other"];
-    expect(place(note, [[1, true]], "section")).toEqual(["# A", "- [ ] Open", "# Task Logs", "", "## A", "- [x] Old", "- [x] New", "", "## B", "- [x] Other"]);
+    const note = ["# A", "- [x] New", "- [ ] Open", "# Task Log", "", "## A", "- [x] Old", "", "## B", "- [x] Other"];
+    expect(place(note, [[1, true]], "section")).toEqual(["# A", "- [ ] Open", "# Task Log", "", "## A", "- [x] Old", "- [x] New", "", "## B", "- [x] Other"]);
   });
 
   it("adds a heading for a section the section does not have yet, at its end", () => {
-    const note = ["# B", "- [x] New", "# Task Logs", "## A", "- [x] Old", "", "# After", "Text"];
-    expect(place(note, [[1, true]], "section")).toEqual(["# B", "# Task Logs", "## A", "- [x] Old", "", "## B", "- [x] New", "", "# After", "Text"]);
+    const note = ["# B", "- [x] New", "# Task Log", "## A", "- [x] Old", "", "# After", "Text"];
+    expect(place(note, [[1, true]], "section")).toEqual(["# B", "# Task Log", "## A", "- [x] Old", "", "## B", "- [x] New", "", "# After", "Text"]);
   });
 
   it("takes the section's name from settings, at the section heading level, case aside", () => {
     expect(place(["## A", "- [x] Done", "## done", "### A", "- [x] Old"], [[1, true]], "section", "## Done", 2))
       .toEqual(["## A", "## done", "### A", "- [x] Old", "- [x] Done"]);
     expect(completedSectionName("  # Archive ")).toBe("Archive");
-    expect(completedSectionName("")).toBe("Task Logs");
+    expect(completedSectionName("")).toBe("Task Log");
   });
 
   it("reopens a task back at the top of the section it came from, dropping a heading it leaves empty", () => {
-    const note = ["# A", "Intro", "- [ ] Open", "", "# Task Logs", "", "## A", "- [ ] Reopened", "    - [x] Step", "", "## B", "- [x] Other"];
-    expect(place(note, [[7, false]], "section")).toEqual(["# A", "Intro", "- [ ] Reopened", "    - [x] Step", "- [ ] Open", "", "# Task Logs", "", "## B", "- [x] Other"]);
-    const last = ["# A", "- [ ] Open", "", "# Task Logs", "", "## A", "- [ ] Reopened", ""];
-    expect(place(last, [[6, false]], "section")).toEqual(["# A", "- [ ] Reopened", "- [ ] Open", "", "# Task Logs", ""]);
+    const note = ["# A", "Intro", "- [ ] Open", "", "# Task Log", "", "## A", "- [ ] Reopened", "    - [x] Step", "", "## B", "- [x] Other"];
+    expect(place(note, [[7, false]], "section")).toEqual(["# A", "Intro", "- [ ] Reopened", "    - [x] Step", "- [ ] Open", "", "# Task Log", "", "## B", "- [x] Other"]);
+    const last = ["# A", "- [ ] Open", "", "# Task Log", "", "## A", "- [ ] Reopened", ""];
+    expect(place(last, [[6, false]], "section")).toEqual(["# A", "- [ ] Reopened", "- [ ] Open", "", "# Task Log", ""]);
   });
 
   it("reopens a task with no section at the note's top, and leaves one whose section is gone where it is", () => {
-    const note = ["---", "a: 1", "---", "- [ ] Top", "# Task Logs", "- [ ] Loose", "## Gone", "- [ ] Orphan"];
-    expect(place(note, [[5, false], [7, false]], "section")).toEqual(["---", "a: 1", "---", "- [ ] Loose", "- [ ] Top", "# Task Logs", "## Gone", "- [ ] Orphan"]);
+    const note = ["---", "a: 1", "---", "- [ ] Top", "# Task Log", "- [ ] Loose", "## Gone", "- [ ] Orphan"];
+    expect(place(note, [[5, false], [7, false]], "section")).toEqual(["---", "a: 1", "---", "- [ ] Loose", "- [ ] Top", "# Task Log", "## Gone", "- [ ] Orphan"]);
   });
 
   it("moves completed subtasks below their siblings, and reopened tasks outside it to the top of their list", () => {
@@ -92,6 +92,6 @@ describe("completed tasks moved to a section", () => {
 
   it("moves a task that was indented under a plain bullet to the left margin", () => {
     const note = ["# A", "- Groceries", "    - [x] Milk", "    - [ ] Eggs"];
-    expect(place(note, [[2, true]], "section")).toEqual(["# A", "- Groceries", "    - [ ] Eggs", "", "# Task Logs", "", "## A", "- [x] Milk"]);
+    expect(place(note, [[2, true]], "section")).toEqual(["# A", "- Groceries", "    - [ ] Eggs", "", "# Task Log", "", "## A", "- [x] Milk"]);
   });
 });

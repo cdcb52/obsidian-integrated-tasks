@@ -182,7 +182,7 @@ describe("completed tasks move in their notes", () => {
       read: async () => text,
       process: async (_file: TFile, update: (content: string) => string) => { text = update(text); return text; }
     } } as unknown as App;
-    const store = new TaskStore(app, () => "YYYY-MM-DD", () => "top", () => false, () => 1, () => completionDates, () => ({ placement, section: "Task Logs" }));
+    const store = new TaskStore(app, () => "YYYY-MM-DD", () => "top", () => false, () => 1, () => completionDates, () => ({ placement, section: "Task Log" }));
     return { store, read: () => text, task: (title: string) => scanTasks("Project.md", text).find(task => task.title === title)! };
   }
 
@@ -199,11 +199,11 @@ describe("completed tasks move in their notes", () => {
   it("moves tasks completed from the menu or the editor to the completed tasks section, stamped", async () => {
     const { store, read, task } = placing("# Plan\n- [ ] One\n- [ ] Two\n", "section", true);
     await store.setStatus([task("One")], "cancelled");
-    expect(read()).toBe("# Plan\n- [ ] Two\n\n# Task Logs\n\n## Plan\n- [-] One\n");
+    expect(read()).toBe("# Plan\n- [ ] Two\n\n# Task Log\n\n## Plan\n- [-] One\n");
     await store.update(task("Two"), { title: "Two", completed: true, indent: 0, destination: "Project.md#Plan" });
-    expect(read()).toMatch(/^# Plan\n\n# Task Logs\n\n## Plan\n- \[-\] One\n- \[x\] Two ✓\d{4}-\d{2}-\d{2}\n$/);
+    expect(read()).toMatch(/^# Plan\n\n# Task Log\n\n## Plan\n- \[-\] One\n- \[x\] Two ✓\d{4}-\d{2}-\d{2}\n$/);
     await store.toggle(task("One"), false);
-    expect(read()).toMatch(/^# Plan\n- \[ \] One\n\n# Task Logs\n\n## Plan\n- \[x\] Two ✓\d{4}-\d{2}-\d{2}\n$/);
+    expect(read()).toMatch(/^# Plan\n- \[ \] One\n\n# Task Log\n\n## Plan\n- \[x\] Two ✓\d{4}-\d{2}-\d{2}\n$/);
   });
 
   it("leaves tasks where they are by default, and between done and cancelled", async () => {

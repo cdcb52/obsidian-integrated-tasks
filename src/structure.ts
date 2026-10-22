@@ -102,12 +102,12 @@ export function destinationString(path: string, heading?: string): string {
 }
 
 /** A group of a note's tasks, named as Settings › Note group names says: the note's path without `.md`, or its name alone. */
-export function noteGroupName(path: string, label: "path" | "name" = "path"): string {
+export function noteGroupName(path: string, label: "path" | "name" = "name"): string {
   const name = path.replace(/\.md$/i, "");
   return label === "name" ? name.split("/").pop() ?? name : name;
 }
 
-export const DEFAULT_COMPLETED_SECTION = "Task Logs";
+export const DEFAULT_COMPLETED_SECTION = "Task Log";
 
 /** The heading Settings › Completed tasks moves them under, set to a section: what settings name, without `#` marks. */
 export function completedSectionName(value: string | undefined): string {

@@ -91,18 +91,18 @@ const key = (target: HTMLElement, key: string, options: KeyboardEventInit = {}) 
 const act = (row: HTMLElement, name: string, options: KeyboardEventInit = {}) => { row.click(); return key(row, name, options); };
 
 describe("groups named by note", () => {
-  it("name a note by its path in the vault, or by its name alone, as Settings › Note group names say", async () => {
+  it("name a note by its name alone, or by its path in the vault, as Settings › Note group names say", async () => {
     const { view, content, plugin } = await setup([note("Work/Clients/Acme.md", 1), note("Home.md", 1)]);
     const groups = () => Array.from(content().querySelectorAll(".tm-section > h2 > span, .tm-kanban-column-header h2")).map(title => title.textContent?.trim());
     // All Tasks groups by note.
     await view.setState({ mode: "all" });
-    expect(groups()).toEqual(["Home", "Work/Clients/Acme"]);
-    plugin.settings.noteGroupLabel = "name";
+    expect(groups()).toEqual(["Home", "Acme"]);
+    plugin.settings.noteGroupLabel = "path";
     await view.setState({ mode: "today" });
     await view.setState({ mode: "all" });
-    expect(groups()).toEqual(["Home", "Acme"]);
+    expect(groups()).toEqual(["Home", "Work/Clients/Acme"]);
     await view.setState({ mode: "all", layout: "kanban" } as never);
-    expect(groups()).toEqual(["Home", "Acme"]);
+    expect(groups()).toEqual(["Home", "Work/Clients/Acme"]);
   });
 });
 

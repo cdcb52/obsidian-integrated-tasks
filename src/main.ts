@@ -368,7 +368,7 @@ export default class TaskManagerPlugin extends Plugin {
     this.settings.completionDates = this.settings.completionDates !== false;
     if (!["keep", "bottom", "section"].includes(this.settings.completedPlacement)) this.settings.completedPlacement = "keep";
     this.settings.completedSection = completedSectionName(typeof this.settings.completedSection === "string" ? this.settings.completedSection : undefined);
-    this.settings.noteGroupLabel = this.settings.noteGroupLabel === "name" ? "name" : "path";
+    this.settings.noteGroupLabel = this.settings.noteGroupLabel === "path" ? "path" : "name";
     const folded: unknown = this.settings.foldedDescriptions;
     this.settings.foldedDescriptions = Array.isArray(folded) ? [...new Set(folded.filter((path): path is string => typeof path === "string"))] : [];
     if (typeof this.settings.sidebarIdleView !== "string" || !this.settings.sidebarIdleView) this.settings.sidebarIdleView = DEFAULT_SETTINGS.sidebarIdleView;
