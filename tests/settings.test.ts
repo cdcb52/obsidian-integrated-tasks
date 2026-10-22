@@ -67,10 +67,10 @@ describe("settings compatibility", () => {
     const { tab, plugin } = setup();
     const groups = tab.getSettingDefinitions();
     expect(groups.map(group => [group.heading, group.items.map(item => item.name)])).toEqual([
-      ["General", ["Inbox note", "New project location", "Move converted notes to the project location", "New task position", "Section heading level", "Task mode", "Show undo notices"]],
+      ["General", ["Inbox note", "New project location", "Move converted notes to the project location", "New task position", "Completed tasks", "Completed tasks section", "Section heading level", "Task mode", "Show undo notices"]],
       ["How tasks are written", ["Date format", "Link dates", "Update dates", "Tag format", "Record completion dates"]],
       ["Ignored tasks", ["Ignored folders and notes", "Ignored tags", "Ignore tasks in code blocks"]],
-      ["Appearance", ["Style", "Task details", "Density", "Show subtasks in task views"]],
+      ["Appearance", ["Style", "Task details", "Density", "Note group names", "Show subtasks in task views"]],
       ["Task sidebar", ["Favorites", "Inbox", "Today", "Upcoming", "All tasks", "Projects", "Tags", "Files"]],
       ["Calendar", ["Color calendar tasks by project", "Color calendar checkboxes by priority"]],
       ["Import", ["Import from the Tasks plugin"]]

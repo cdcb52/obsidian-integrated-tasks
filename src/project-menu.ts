@@ -37,6 +37,8 @@ export function openProjectMenu(plugin: TaskManagerPlugin, project: Project, anc
   anchor.setAttribute("aria-expanded", "true");
   const menu = openActionMenu({
     doc: anchor.ownerDocument, at: options.at ?? { x: rect.left, y: rect.bottom + 4 }, label: "Project actions", returnFocus: anchor,
+    // Opened from its "…" button (not at the pointer), the button closes it again.
+    anchor: options.at ? undefined : anchor,
     onClose: () => anchor.setAttribute("aria-expanded", "false"),
     entries: [
       { kind: "icons", label: "Priority", key: "p", buttons: priorityIcons(project.priority, priority => updateProject(plugin, project, draft => ({ ...draft, priority: priority ? String(priority) : "" }))) },

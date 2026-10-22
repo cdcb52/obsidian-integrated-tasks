@@ -3,6 +3,7 @@ import { todayIso } from "./date";
 import { useIndentation } from "./task-indentation";
 import { parseIgnoreList } from "./ignore";
 import { noteRecurringCompletion } from "./note-recurring-completion";
+import type { PlacementOptions } from "./completed-placement";
 import { isRepeatingTask, recurringFile, type RecurringOutcome } from "./recurring-task";
 import { shiftCalendar, type CalendarScope } from "./calendar";
 import { scanTasks } from "./parser";
@@ -12,7 +13,7 @@ import { SmartListEditorModal, type SmartListDraft } from "./smart-list-editor";
 import { ProjectCreatorModal, projectFolderPath, projectNotePath, projectNoteContent, type ProjectDraft } from "./project-creator";
 import { setTagFormat as useTagFormat, type TagFormat } from "./task-tags";
 import { convertTagFormat } from "./tag-links";
-import { setCodeBlockTasks } from "./structure";
+import { completedSectionName, setCodeBlockTasks } from "./structure";
 import { openConfirm } from "./confirm-modal";
 import { TaskModeController } from "./task-mode";
 import type { TaskEditorPreset } from "./types";
@@ -65,7 +66,8 @@ export default class TaskManagerPlugin extends Plugin {
       return { useTab: vault.getConfig ? vault.getConfig("useTab") !== false : false, tabSize: Number.isInteger(size) && size > 0 ? size : 4 };
     });
     this.index = new TaskIndex(this.app, () => this.settings, () => this.dateFormat(), new IndexedDbCache(this.app));
-    this.store = new TaskStore(this.app, () => this.dateFormat(), () => this.settings.newTaskPosition, () => this.settings.linkDates, () => this.settings.sectionHeadingLevel, () => this.settings.completionDates);
+    this.store = new TaskStore(this.app, () => this.dateFormat(), () => this.settings.newTaskPosition, () => this.settings.linkDates, () => this.settings.sectionHeadingLevel, () => this.settings.completionDates,
+      () => this.completedPlacement());
     this.store.onChange = change => this.offerUndo(change);
 
     this.registerView(TASK_NAV_VIEW, (leaf) => new TaskNavigationView(leaf, this));
@@ -74,7 +76,8 @@ export default class TaskManagerPlugin extends Plugin {
     this.registerEditorExtension(noteDateInput(() => this.dateFormat(), () => this.settings.taskMode, () => this.settings.linkDates));
     this.registerEditorExtension(noteRecurringCompletion(() => this.dateFormat(), task => !this.settings.taskMode && isRepeatingTask(this.app, task),
       (task, outcome) => { this.completeRecurringTaskFromNote(task, outcome); }, undefined,
-      { enabled: () => this.settings.completionDates, linkDates: () => this.settings.linkDates }, () => this.settings.sectionHeadingLevel));
+      { enabled: () => this.settings.completionDates, linkDates: () => this.settings.linkDates }, () => this.settings.sectionHeadingLevel,
+      () => this.settings.taskMode ? undefined : this.completedPlacement()));
     this.registerEditorExtension(noteTokenEditor(() => this.dateFormat()));
     // The Task Details sidebar follows the caret in a note, showing the task it is on.
     this.registerEditorExtension(EditorView.updateListener.of(update => { if (update.selectionSet || update.docChanged) this.refreshTaskSidebar(); }));
@@ -363,6 +366,11 @@ export default class TaskManagerPlugin extends Plugin {
     // Three panes are the default; only an explicit Two panes choice keeps two.
     this.settings.taskDetails = this.settings.taskDetails === "view" ? "view" : "sidebar";
     this.settings.completionDates = this.settings.completionDates !== false;
+    if (!["keep", "bottom", "section"].includes(this.settings.completedPlacement)) this.settings.completedPlacement = "keep";
+    this.settings.completedSection = completedSectionName(typeof this.settings.completedSection === "string" ? this.settings.completedSection : undefined);
+    this.settings.noteGroupLabel = this.settings.noteGroupLabel === "name" ? "name" : "path";
+    const folded: unknown = this.settings.foldedDescriptions;
+    this.settings.foldedDescriptions = Array.isArray(folded) ? [...new Set(folded.filter((path): path is string => typeof path === "string"))] : [];
     if (typeof this.settings.sidebarIdleView !== "string" || !this.settings.sidebarIdleView) this.settings.sidebarIdleView = DEFAULT_SETTINGS.sidebarIdleView;
     const options: unknown = this.settings.viewOptions;
     // A fresh object, never the defaults' own: views write into it.
@@ -627,6 +635,13 @@ export default class TaskManagerPlugin extends Plugin {
     return file.path;
   }
 
+  /** Folds (or unfolds) a project's description card on its page, for every visit. */
+  async foldDescription(path: string, folded: boolean): Promise<void> {
+    const others = this.settings.foldedDescriptions.filter(item => item !== path);
+    this.settings.foldedDescriptions = folded ? [...others, path] : others;
+    await this.saveSettings();
+  }
+
   /** Writes a project's description property; empty text removes it. */
   async setProjectDescription(path: string, text: string): Promise<void> {
     const file = this.app.vault.getAbstractFileByPath(path);
@@ -693,10 +708,18 @@ export default class TaskManagerPlugin extends Plugin {
     return true;
   }
 
-  /** Reading view writes checkbox clicks itself; with completion dates on, the store completes (stamping it) or reopens the task instead. */
+  /** Settings › Completed tasks, for the store and the editor. */
+  completedPlacement(): Pick<PlacementOptions, "placement" | "section"> {
+    return { placement: this.settings.completedPlacement, section: this.settings.completedSection };
+  }
+
+  /**
+   * Reading view writes checkbox clicks itself; with completion dates on (or completed tasks moving), the store completes
+   * (stamping it) or reopens the task instead.
+   */
   private toggleTaskFromReadingView(task: Task, completed: boolean): boolean {
     if (completed && this.completeRecurringTaskFromNote(task)) return true;
-    if (this.settings.taskMode || !this.settings.completionDates) return false;
+    if (this.settings.taskMode || (!this.settings.completionDates && this.settings.completedPlacement === "keep")) return false;
     this.recurringNoteQueue = this.recurringNoteQueue.then(async () => {
       const markdown = this.app.workspace.getActiveViewOfType(MarkdownView);
       if (markdown?.file?.path === task.path) await markdown.save();

@@ -1,7 +1,7 @@
 import { ItemView, Notice, Platform, setIcon, TFile, type WorkspaceLeaf } from "obsidian";
 import type TaskManagerPlugin from "./main";
 import { NEW_TASK_ID, TaskMainView, tasksOpenInSidebar } from "./task-view";
-import { splitDestination } from "./structure";
+import { noteGroupName, splitDestination } from "./structure";
 import { renderCalendar } from "./calendar-view";
 import { ListDragController } from "./list-drag-view";
 import { activeTaskDrag, markDropZone, onTaskDrag, startTaskDrag, TASK_DRAG_TYPE, type SidebarDrop, type TaskDrag } from "./sidebar-drop";
@@ -132,6 +132,8 @@ export class TaskSidebarView extends ItemView {
       this.dragging = Boolean(drag);
       if (drag) this.render(); else this.scheduleRender();
     });
+    // A click where nothing takes focus (between the properties, say) focuses the sidebar, so its keys still work there.
+    this.content.tabIndex = -1;
     // Escape takes the task shown away (see closeDetails).
     this.registerDomEvent(this.content, "keydown", event => {
       if (event.key !== "Escape" || !this.shownId) return;
@@ -400,7 +402,7 @@ export class TaskSidebarView extends ItemView {
     const groups = grouping === "default" || grouping === "none" ? [["", shown] as const] : [...groupTasks(shown, grouping, descending && sort === grouping)];
     for (const [key, group] of groups) {
       const parent = key ? element.createEl("section", { cls: "tm-section" }) : element;
-      if (key) parent.createEl("h2", { text: /^\d{4}-\d{2}-\d{2}$/.test(key) ? formatDate(key, this.plugin.dateFormat()) : grouping === "source" ? key.replace(/\.md$/i, "") : key });
+      if (key) parent.createEl("h2", { text: /^\d{4}-\d{2}-\d{2}$/.test(key) ? formatDate(key, this.plugin.dateFormat()) : grouping === "source" ? noteGroupName(key, this.plugin.settings.noteGroupLabel) : key });
       const list = parent.createDiv({ cls: "tm-task-list", attr: { role: "list", "aria-label": key || "Tasks without a date" } });
       for (const task of group) this.renderRow(list, task);
     }
@@ -594,8 +596,9 @@ export class TaskSidebarView extends ItemView {
     const shown = tasks.slice(0, this.listRows);
     const today = todayIso();
     const overdue = (task: Task): boolean => (actionDate(task) ?? today) < today;
+    // Today's tasks are headed Today only below overdue ones.
     const groups: Array<readonly [string, Task[]]> = grouping === "today"
-      ? ([["Overdue", shown.filter(overdue)], ["Today", shown.filter(task => !overdue(task))]] as const).filter(([, group]) => group.length)
+      ? shown.some(overdue) ? ([["Overdue", shown.filter(overdue)], ["Today", shown.filter(task => !overdue(task))]] as const).filter(([, group]) => group.length) : [["", shown]]
       : grouping === "none" ? [["", shown]] : [...groupTasks(shown, grouping, descending && sort === grouping)];
     // A project's headings in the order its note has them, as its page shows them.
     if (grouping === "section" && idle.query.projectPath) {
@@ -604,7 +607,7 @@ export class TaskSidebarView extends ItemView {
     }
     for (const [key, group] of groups) {
       const parent = key ? element.createEl("section", { cls: "tm-section" }) : element;
-      const title = /^\d{4}-\d{2}-\d{2}$/.test(key) ? formatDate(key, this.plugin.dateFormat()) : grouping === "source" ? key.replace(/\.md$/i, "") : key;
+      const title = /^\d{4}-\d{2}-\d{2}$/.test(key) ? formatDate(key, this.plugin.dateFormat()) : grouping === "source" ? noteGroupName(key, this.plugin.settings.noteGroupLabel) : key;
       if (key) parent.createEl("h2", { text: title });
       const list = parent.createDiv({ cls: "tm-task-list", attr: { role: "list", "aria-label": title || idle.label } });
       for (const task of group) this.renderRow(list, task);
@@ -829,7 +832,9 @@ export class TaskSidebarView extends ItemView {
     this.saving = this.saving.then(() => {
       // Not found as it was, the task as last drawn: the store finds its line by its text, or refuses.
       const current = this.current(task) ?? task;
-      return this.change(current, async () => { await this.plugin.store.toggle(current, completed); return [current.path]; });
+      // Completed tasks may move in their note (Settings › Completed tasks): it is found again by its title there.
+      const moves = this.plugin.settings.completedPlacement !== "keep" && current.completed !== completed;
+      return this.change(current, async () => { await this.plugin.store.toggle(current, completed); return [current.path]; }, moves ? current.path : undefined);
     }).catch(failed);
   }
 

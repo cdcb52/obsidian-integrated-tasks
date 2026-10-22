@@ -1,8 +1,10 @@
 import { indentWidth } from "./task-indentation";
+import { placeInSlots, type PlacementOptions } from "./completed-placement";
 import { replaceDescription } from "./task-description";
 import { insertIntoDestination, lineEnding } from "./markdown";
 import { liveTaskBlock, noteSnapshot, rewriteBlock, subtaskIndent, type NoteSnapshot } from "./task-block";
 import { rewriteTaskLine } from "./parser";
+import { draftStatus, isClosedStatus } from "./task-status";
 import { destinationString, splitDestination } from "./structure";
 import { normalizePath } from "obsidian";
 import type { ListPlacement } from "./list-drag";
@@ -18,6 +20,8 @@ export interface BulkTaskOptions {
   dateFormat?: string;
   linkDates?: boolean;
   sectionHeadingLevel?: number;
+  /** Where tasks completed or reopened in place move in their notes (Settings › Completed tasks). */
+  completed?: Pick<PlacementOptions, "placement" | "section">;
 }
 
 /** An unchanged destination string never moves a task, even if its heading contains `|` or `[[links]]`. */
@@ -70,6 +74,15 @@ export function planBulkTasks(contents: Map<string, string>, changes: BulkTaskCh
     if (entry.draft?.description !== undefined && entry.draft.description !== (entry.task.description ?? "")) {
       if ((entry.block.description ?? "") !== (entry.task.description ?? "")) throw new Error("Task description changed. Refresh and try again.");
       replaceDescription(lines.get(entry.task.path)!, entry.block.start, entry.block.descriptionLines ?? [], entry.draft.description, entry.block.indent, entry.block.description);
+    }
+  }
+  // Completed (or reopened) where they are, tasks move as Settings › Completed tasks says; tasks moved or dropped
+  // somewhere go just there.
+  if (options.completed && options.completed.placement !== "keep" && !options.delete && !anchor && !moving.length) {
+    for (const [path, fileLines] of lines) {
+      const changed = entries.filter(entry => entry.task.path === path && entry.draft && entry.task.completed !== isClosedStatus(draftStatus(entry.draft)))
+        .map(entry => ({ line: entry.block.start, closed: !entry.task.completed }));
+      if (changed.length) placeInSlots(fileLines, snapshot(path), changed, { ...options.completed, sectionHeadingLevel: options.sectionHeadingLevel, dateFormat: options.dateFormat });
     }
   }
   // A subtask lines up with the anchor's other subtasks, however the note indents them.

@@ -1,4 +1,5 @@
 import { parseIgnoreList } from "./ignore";
+import { DEFAULT_COMPLETED_SECTION, completedSectionName } from "./structure";
 import { Notice, PluginSettingTab, Setting, type App, type SettingDefinitionRender } from "obsidian";
 import type TaskManagerPlugin from "./main";
 import type { SidebarSection } from "./types";
@@ -100,6 +101,32 @@ export class TaskManagerSettingTab extends PluginSettingTab {
         name: "New task position",
         desc: "Insert added or moved tasks at the top or bottom of the first checklist in the destination file or heading. If there is no checklist, insert at the start of the scope.",
         render: (setting: Setting) => this.renderPositionSetting(setting)
+      },
+      {
+        section: "General",
+        name: "Completed tasks",
+        desc: "Where a task goes in its note when you complete it: it stays where it is, moves below the other tasks in its list, or moves to the completed tasks section. Reopening a moved task puts it back at the top of its list, or of the section it came from.",
+        render: (setting: Setting) => { setting.addDropdown(dropdown => dropdown
+          .addOption("keep", "Keep in place")
+          .addOption("bottom", "Move to the bottom of the list")
+          .addOption("section", "Move to the completed tasks section")
+          .setValue(this.plugin.settings.completedPlacement)
+          .onChange(async value => {
+            this.plugin.settings.completedPlacement = value === "bottom" || value === "section" ? value : "keep";
+            await this.plugin.saveSettings();
+          })); }
+      },
+      {
+        section: "General",
+        name: "Completed tasks section",
+        desc: "The heading completed tasks move under when Completed tasks is set to the section, such as Task Logs. It is added at the end of the note when missing, at the section heading level, with a heading below it for each section the tasks came from.",
+        render: (setting: Setting) => { setting.addText(text => text
+          .setPlaceholder(DEFAULT_COMPLETED_SECTION)
+          .setValue(this.plugin.settings.completedSection)
+          .onChange(value => this.applySoon("completedSection", async () => {
+            this.plugin.settings.completedSection = completedSectionName(value);
+            await this.plugin.saveSettings();
+          }))); }
       },
       {
         section: "General",
@@ -241,6 +268,19 @@ export class TaskManagerSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
             this.plugin.refreshViews();
             this.plugin.refreshNavigation();
+          })); }
+      },
+      {
+        section: "Appearance",
+        name: "Note group names",
+        desc: "When tasks are grouped by note, name each group by the note's full path, such as Projects/Website/Launch, or by the note's name alone, such as Launch.",
+        render: (setting: Setting) => { setting.addDropdown(dropdown => dropdown
+          .addOption("path", "Full path").addOption("name", "Note name only")
+          .setValue(this.plugin.settings.noteGroupLabel)
+          .onChange(async value => {
+            this.plugin.settings.noteGroupLabel = value === "name" ? "name" : "path";
+            await this.plugin.saveSettings();
+            this.plugin.refreshViews();
           })); }
       },
       {

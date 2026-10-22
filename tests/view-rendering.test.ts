@@ -90,6 +90,22 @@ const key = (target: HTMLElement, key: string, options: KeyboardEventInit = {}) 
 /** Row actions (S, M, Alt+arrows) need the task selected: click it first. */
 const act = (row: HTMLElement, name: string, options: KeyboardEventInit = {}) => { row.click(); return key(row, name, options); };
 
+describe("groups named by note", () => {
+  it("name a note by its path in the vault, or by its name alone, as Settings › Note group names say", async () => {
+    const { view, content, plugin } = await setup([note("Work/Clients/Acme.md", 1), note("Home.md", 1)]);
+    const groups = () => Array.from(content().querySelectorAll(".tm-section > h2 > span, .tm-kanban-column-header h2")).map(title => title.textContent?.trim());
+    // All Tasks groups by note.
+    await view.setState({ mode: "all" });
+    expect(groups()).toEqual(["Home", "Work/Clients/Acme"]);
+    plugin.settings.noteGroupLabel = "name";
+    await view.setState({ mode: "today" });
+    await view.setState({ mode: "all" });
+    expect(groups()).toEqual(["Home", "Acme"]);
+    await view.setState({ mode: "all", layout: "kanban" } as never);
+    expect(groups()).toEqual(["Home", "Acme"]);
+  });
+});
+
 describe("paged task lists", () => {
   it("keeps rows the user loaded in a later section across re-renders, with a minimum per section", async () => {
     const { view, internals, content } = await setup([note("A.md", 500), note("B.md", 300)]);
@@ -807,13 +823,18 @@ describe("a board's default grouping", () => {
 describe("Today's Overdue group", () => {
   it("shows only with something overdue, in a list and on a board", async () => {
     const plus = (days: number) => { const date = new Date(); date.setDate(date.getDate() + days); return todayIso(date); };
-    const { view, content, plugin } = await setup([["A.md", `- [ ] Now ${plus(0)}`]]);
+    const { view, content, plugin, edit } = await setup([["A.md", `- [ ] Now ${plus(0)}`]]);
     plugin.settings.showSubtasks = true;
     const groups = () => Array.from(content().querySelectorAll(".tm-section > h2, .tm-kanban-column-header h2")).map(title => title.textContent?.trim());
+    // Nothing overdue: the list is today's tasks alone, with no heading over them; a board keeps its column.
     await view.setState({ mode: "today", showProjects: false } as never);
-    expect(groups()).toEqual(["Today"]);
+    expect(groups()).toEqual([]);
+    expect(rows(content()).map(row => row.querySelector(".tm-task-title")?.textContent)).toEqual(["Now"]);
     await view.setState({ mode: "today", layout: "kanban", showProjects: false } as never);
     expect(groups()).toEqual(["Today"]);
+    await edit("A.md", `- [ ] Now ${plus(0)}\n- [ ] Late ${plus(-2)}`);
+    await view.setState({ mode: "today", layout: "list", showProjects: false } as never);
+    expect(groups()).toEqual(["Overdue", "Today"]);
   });
 });
 
@@ -1052,6 +1073,56 @@ describe("Things card subtasks", () => {
     };
     expect(open(false)).toEqual({ checks: 1, childRow: false });
     expect(open(true)).toEqual({ checks: 0, childRow: true });
+  });
+
+  it("stays open after Enter adds a subtask, with the next one focused below it, even when the browser blurs the field as it is redrawn", async () => {
+    // As Chromium does: removing the focused field (or what holds it) fires blur while it is still in the page.
+    const blurFirst = (node: Node) => {
+      const active = document.activeElement as HTMLElement | null;
+      if (active && active !== document.body && node.contains(active) && node.isConnected) {
+        active.dispatchEvent(new FocusEvent("blur"));
+        active.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+      }
+    };
+    const { removeChild } = Node.prototype, { remove } = Element.prototype;
+    Node.prototype.removeChild = function <T extends Node>(this: Node, child: T): T { blurFirst(child); return removeChild.call(this, child) as T; };
+    Element.prototype.remove = function (this: Element) { blurFirst(this); remove.call(this); };
+    try {
+      const { view, internals, plugin, store, content, edit, read } = await setup([["A.md", "- [ ] Parent"]]);
+      plugin.settings.style = "things";
+      // As the store does: the subtask goes below the one it follows (or last), and its line comes back.
+      Object.assign(store, { update: vi.fn().mockResolvedValue(undefined), addSubtask: vi.fn(async (_parent: unknown, subtask: { title: string }, after?: { line: number }) => {
+        const lines = read("A.md").split("\n");
+        const line = after ? after.line + 1 : lines.length;
+        lines.splice(line, 0, `    - [ ] ${subtask.title}`);
+        await edit("A.md", lines.join("\n"));
+        return line;
+      }) });
+      await view.setState({ mode: "all" });
+      rows(content())[0].dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
+      await vi.waitFor(() => expect(content().querySelector(".tm-things-card")).not.toBeNull());
+      content().querySelector<HTMLElement>("[data-tm-focus-key='card-add-checklist']")!.click();
+      const type = async (title: string) => {
+        const input = content().querySelector<HTMLInputElement>(".is-new .tm-things-card-check-title")!;
+        expect(document.activeElement).toBe(input);
+        input.value = title;
+        input.dispatchEvent(new Event("input"));
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+        await new Promise(resolve => setTimeout(resolve, 20));
+      };
+      await type("First");
+      // Something else redraws the list (Obsidian telling of the note's change again, say) with the next line focused.
+      internals.refresh();
+      await type("Second");
+      expect(read("A.md")).toBe("- [ ] Parent\n    - [ ] First\n    - [ ] Second");
+      const card = content().querySelector(".tm-things-card")!;
+      expect(card).not.toBeNull();
+      expect(Array.from(card.querySelectorAll<HTMLInputElement>(".tm-things-card-check-title")).map(input => input.value)).toEqual(["First", "Second", ""]);
+      expect(document.activeElement).toBe(card.querySelector(".is-new .tm-things-card-check-title"));
+    } finally {
+      Node.prototype.removeChild = removeChild;
+      Element.prototype.remove = remove;
+    }
   });
 });
 

@@ -172,3 +172,46 @@ it("uses unlinked dates for creation, updates and bulk edits", async () => {
   expect(read()).toContain("New 2026-09-09 {2026-09-11}");
   expect(read()).not.toContain("[[");
 });
+
+describe("completed tasks move in their notes", () => {
+  function placing(content: string, placement: "keep" | "bottom" | "section", completionDates = false) {
+    const file = Object.assign(new TFile(), { path: "Project.md" });
+    let text = content;
+    const app = { vault: {
+      getAbstractFileByPath: (path: string) => path === file.path ? file : null,
+      read: async () => text,
+      process: async (_file: TFile, update: (content: string) => string) => { text = update(text); return text; }
+    } } as unknown as App;
+    const store = new TaskStore(app, () => "YYYY-MM-DD", () => "top", () => false, () => 1, () => completionDates, () => ({ placement, section: "Task Logs" }));
+    return { store, read: () => text, task: (title: string) => scanTasks("Project.md", text).find(task => task.title === title)! };
+  }
+
+  it("moves a task checked off below its list, and back to the top when reopened, undoing as one change", async () => {
+    const { store, read, task } = placing("# Plan\n- [ ] One\n- [ ] Two\n# Later\n", "bottom");
+    await store.toggle(task("One"), true);
+    expect(read()).toBe("# Plan\n- [ ] Two\n- [x] One\n# Later\n");
+    await store.toggle(task("One"), false);
+    expect(read()).toBe("# Plan\n- [ ] One\n- [ ] Two\n# Later\n");
+    await store.undo();
+    expect(read()).toBe("# Plan\n- [ ] Two\n- [x] One\n# Later\n");
+  });
+
+  it("moves tasks completed from the menu or the editor to the completed tasks section, stamped", async () => {
+    const { store, read, task } = placing("# Plan\n- [ ] One\n- [ ] Two\n", "section", true);
+    await store.setStatus([task("One")], "cancelled");
+    expect(read()).toBe("# Plan\n- [ ] Two\n\n# Task Logs\n\n## Plan\n- [-] One\n");
+    await store.update(task("Two"), { title: "Two", completed: true, indent: 0, destination: "Project.md#Plan" });
+    expect(read()).toMatch(/^# Plan\n\n# Task Logs\n\n## Plan\n- \[-\] One\n- \[x\] Two ✓\d{4}-\d{2}-\d{2}\n$/);
+    await store.toggle(task("One"), false);
+    expect(read()).toMatch(/^# Plan\n- \[ \] One\n\n# Task Logs\n\n## Plan\n- \[x\] Two ✓\d{4}-\d{2}-\d{2}\n$/);
+  });
+
+  it("leaves tasks where they are by default, and between done and cancelled", async () => {
+    const kept = placing("- [ ] One\n- [ ] Two\n", "keep");
+    await kept.store.toggle(kept.task("One"), true);
+    expect(kept.read()).toBe("- [x] One\n- [ ] Two\n");
+    const moved = placing("- [x] One\n- [ ] Two\n", "bottom");
+    await moved.store.setStatus([moved.task("One")], "cancelled");
+    expect(moved.read()).toBe("- [-] One\n- [ ] Two\n");
+  });
+});

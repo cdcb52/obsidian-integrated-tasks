@@ -190,10 +190,12 @@ it("writes a subtask typed in the card and, after Enter, opens the next one belo
   plugin.settings.style = "things";
   const internals = view as unknown as { expanded?: { id: string; title: string; notes: string; subtask?: unknown }; cardFocus?: string; addCardSubtask(id: string, title: string, after: unknown, next: boolean): Promise<void> };
   internals.expanded = { id: tasks[0].id, title: "A", notes: "" };
+  // The store says which line it wrote the subtask on: the next one goes right below it.
+  addSubtask.mockResolvedValueOnce(3);
   await internals.addCardSubtask(tasks[0].id, "First step", undefined, true);
   expect(addSubtask).toHaveBeenCalledExactlyOnceWith(tasks[0], expect.objectContaining({ title: "First step" }), undefined);
   expect(plugin.index.refreshPath).toHaveBeenCalledWith("Work.md");
-  expect(internals.expanded.subtask).toEqual({ after: undefined, text: "" });
+  expect(internals.expanded.subtask).toEqual({ after: "Work.md:3", text: "" });
   expect(internals.cardFocus).toBe("new");
   // Leaving the field (rather than Enter) adds the subtask without opening another.
   internals.expanded = { id: tasks[0].id, title: "A", notes: "" };

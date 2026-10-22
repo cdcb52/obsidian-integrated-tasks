@@ -165,6 +165,15 @@ describe("what the Task Details sidebar shows", () => {
     expect(side().querySelector<HTMLTextAreaElement>(".tm-sidebar-title-field")!.value).toBe("Tomorrow's");
     side().querySelector<HTMLElement>(".tm-sidebar-title-field")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
     expect(upcoming()).toHaveLength(2);
+    // A click on empty space between the details focuses the sidebar itself (it can take focus), not the page, so
+    // Escape still works.
+    side().querySelector<HTMLElement>(".tm-sidebar-idle .tm-task-item")!.click();
+    expect(upcoming()).toHaveLength(0);
+    expect(side().getAttribute("tabindex")).toBe("-1");
+    side().focus();
+    expect(document.activeElement).toBe(side());
+    side().dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    expect(upcoming()).toHaveLength(2);
   });
 
   it("lets the idle list's name pick what it shows (a view, a smart list, a project or a tag), with View options of its own for each", async () => {

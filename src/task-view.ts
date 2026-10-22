@@ -1,5 +1,5 @@
 import { taskTitleLabel } from "./task-title";
-import { splitDestination } from "./structure";
+import { noteGroupName, splitDestination } from "./structure";
 import { projectStatuses, renderProjectProgress } from "./project-progress";
 import { renderProjectHeaderDetails } from "./project-header-details";
 import { renderTaskDetails } from "./task-row-details";
@@ -147,6 +147,8 @@ export class TaskMainView extends ItemView {
   private selection = new TaskSelection();
   /** The task open as a card in the Things style, with its unsaved title and notes. */
   private expanded?: { id: string } & TaskCardDraft;
+  /** The open card's task as last seen, to find it again when a change in its note moves it to another line (see followCard). */
+  private cardSource?: { path: string; line: number; raw: string; title: string };
   /** What the card focuses on its next draw: a subtask's id, or "new" for the subtask being typed. */
   private cardFocus?: string;
   /** Height of the rows the open card replaced, which it shrinks back to when closing. */
@@ -383,6 +385,8 @@ export class TaskMainView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
+    // A click where nothing takes focus focuses the view, so its keys (undo, the selection's) still work there.
+    if (this.content) this.content.tabIndex = -1;
     this.registerDomEvent(this.containerEl.ownerDocument, "click", event => { this.clearSelectionOutside(event); this.collapseCardOutside(event); }, true);
     this.registerDomEvent(this.containerEl.ownerDocument, "pointerdown", event => this.viewOptions?.handleOutside(event));
     // Obsidian's own undo only covers the editor; in task views Cmd/Ctrl+Z undoes the last task change,
@@ -626,6 +630,7 @@ export class TaskMainView extends ItemView {
   }
 
   private renderTaskResultsNow(container: HTMLElement): void {
+    this.followCard();
     container.empty();
     this.resetRows();
     this.updateSelection();
@@ -791,7 +796,7 @@ export class TaskMainView extends ItemView {
         // Date groupings are keyed by ISO date; show them in the user's format.
         const title = ["date", "scheduledDate", "deadline"].includes(this.grouping) && /^\d{4}-\d{2}-\d{2}$/.test(key)
           ? formatDate(key, this.plugin.dateFormat())
-          : this.grouping === "source" ? key.replace(/\.md$/i, "") : key;
+          : this.grouping === "source" ? noteGroupName(key, this.plugin.settings.noteGroupLabel) : key;
         this.renderSection(container, title, group, undefined, taskGroupTarget(this.grouping, group[0]));
       }
       return;
@@ -803,15 +808,22 @@ export class TaskMainView extends ItemView {
     }
     if (defaults.mode === "today") {
       const today = todayIso();
-      // Overdue shows only with something overdue.
+      // Overdue shows only with something overdue; without it, today's tasks need no heading of their own.
       const overdue = tasks.filter((task) => (actionDate(task) ?? today) < today);
-      if (overdue.length) this.renderSection(container, "Overdue", overdue, "alert", { property: "date", value: addDays(today, -1) });
-      this.renderSection(container, "Today", tasks.filter((task) => actionDate(task) === today), undefined, { property: "date", value: today });
+      const target = { property: "date" as const, value: today };
+      const todays = tasks.filter((task) => actionDate(task) === today);
+      if (overdue.length) {
+        this.renderSection(container, "Overdue", overdue, "alert", { property: "date", value: addDays(today, -1) });
+        this.renderSection(container, "Today", todays, undefined, target);
+      } else {
+        this.addMoveTarget("Today", target);
+        this.renderTaskList(container, todays, target);
+      }
     } else if (defaults.mode === "upcoming") {
       for (const [date, group] of groupTasks(tasks, "date")) this.renderSection(container, formatDate(date, this.plugin.dateFormat()), group, undefined, taskGroupTarget("date", group[0]));
     } else if (defaults.mode === "all") {
       for (const [path, group] of groupTasks(tasks, "source")) {
-        this.renderSection(container, path.replace(/\.md$/i, ""), group, undefined, { destination: path });
+        this.renderSection(container, noteGroupName(path, this.plugin.settings.noteGroupLabel), group, undefined, { destination: path });
       }
     } else {
       this.renderTaskList(container, tasks);
@@ -884,7 +896,7 @@ export class TaskMainView extends ItemView {
       const header = section.createDiv({ cls: "tm-kanban-column-header" });
       // Date columns are keyed by ISO date; show them in the user's format (Overdue and Today keep their names).
       const title = column.target?.property && ["date", "scheduledDate", "deadline"].includes(column.target.property) && /^\d{4}-\d{2}-\d{2}$/.test(column.title)
-        ? formatDate(column.title, this.plugin.dateFormat()) : column.target?.property === "source" ? column.title.replace(/\.md$/i, "") : column.title;
+        ? formatDate(column.title, this.plugin.dateFormat()) : column.target?.property === "source" ? noteGroupName(column.title, this.plugin.settings.noteGroupLabel) : column.title;
       header.createEl("h2", { text: title });
       this.renderGroupAddButton(header, title, column.target);
       if (column.target) { this.listDrag?.group(section, column.target); this.addMoveTarget(title, column.target); }
@@ -1133,7 +1145,7 @@ export class TaskMainView extends ItemView {
     };
     anchor.setAttribute("aria-expanded", "true");
     const menu = openActionMenu({
-      doc: anchor.ownerDocument, at: { x: rect.left, y: rect.bottom + 4 }, label: "Smart list actions", returnFocus: anchor,
+      doc: anchor.ownerDocument, at: { x: rect.left, y: rect.bottom + 4 }, label: "Smart list actions", returnFocus: anchor, anchor,
       onClose: () => anchor.setAttribute("aria-expanded", "false"),
       entries: [
         { kind: "submenu", label: "Rename", icon: "pencil", key: "n", open: target => {
@@ -1199,7 +1211,24 @@ export class TaskMainView extends ItemView {
     card.empty();
     this.showDescription(card, Boolean(project?.description));
     if (!project?.description) return;
-    card.setText(project.description);
+    // Folded (from its chevron), it shows its first line; it stays folded on later visits.
+    const folded = this.plugin.settings.foldedDescriptions.includes(project.path);
+    card.toggleClass("is-folded", folded);
+    const fold = card.createEl("button", { cls: "clickable-icon tm-fold-toggle tm-description-fold", attr: {
+      type: "button", "aria-expanded": String(!folded), "aria-label": folded ? "Expand description" : "Collapse description",
+      title: folded ? "Expand" : "Collapse", "data-tm-focus-key": "project-description-fold"
+    } });
+    setIcon(fold, "chevron-right");
+    fold.addEventListener("click", event => {
+      event.stopPropagation();
+      const focused = fold.ownerDocument.activeElement === fold;
+      void this.plugin.foldDescription(project.path, !folded).then(() => {
+        this.renderHeaderDescription(this.plugin.index.projects().find(item => item.path === project.path) ?? project);
+        if (focused) card.querySelector<HTMLElement>(".tm-description-fold")?.focus();
+      });
+    });
+    fold.addEventListener("keydown", event => event.stopPropagation());
+    card.createSpan({ cls: "tm-project-description-text", text: project.description });
     card.setAttribute("role", "button");
     card.setAttribute("tabindex", "0");
     card.setAttribute("aria-label", "Edit description");
@@ -1229,6 +1258,8 @@ export class TaskMainView extends ItemView {
     if (!card || card.querySelector("textarea")) return;
     card.empty();
     this.showDescription(card, true);
+    // It edits whole, folded or not.
+    card.removeClass("is-folded");
     card.removeAttribute("role");
     card.removeAttribute("tabindex");
     card.removeAttribute("aria-label");
@@ -1478,17 +1509,19 @@ export class TaskMainView extends ItemView {
       event.preventDefault();
       this.openProjectMenu(project, button, event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : undefined);
     });
+    // The property the list is grouped by is its group's heading, so the row leaves it out, as a task's does.
+    const shown = withoutGrouped(project, this.isProjectsView && this.grouping === "default" ? "status" : this.metadataGrouping);
     if (lead) {
       const secondary = content.createDiv({ cls: "tm-things-secondary" });
       // On phones, and in a board's narrow columns, the dates go below the name, which would otherwise have no room.
-      renderThingsProjectDetails({ lead, inline: primary, secondary }, project, { dateFormat: this.plugin.dateFormat(), edit: field => this.openProjectProperty(project, field), datesBelow: Platform.isPhone || board });
+      renderThingsProjectDetails({ lead, inline: primary, secondary }, shown, { dateFormat: this.plugin.dateFormat(), edit: field => this.openProjectProperty(project, field), datesBelow: Platform.isPhone || board });
       if (!lead.childElementCount) lead.remove();
       if (!secondary.childElementCount) secondary.remove();
       row.toggleClass("is-single-line", !secondary.parentElement);
       return row;
     }
     const metadata = content.createDiv({ cls: "tm-task-metadata tm-project-metadata tm-project-header-metadata" });
-    renderProjectHeaderDetails(metadata, project, property => this.openProjectProperty(project, property), this.plugin.dateFormat(), undefined, primary, false, false);
+    renderProjectHeaderDetails(metadata, shown, property => this.openProjectProperty(project, property), this.plugin.dateFormat(), undefined, primary, false, false);
     if (!metadata.childElementCount) metadata.remove();
     // Nothing under the name: its progress sits level with it (see styles.css).
     row.toggleClass("is-single-line", !metadata.parentElement);
@@ -2283,6 +2316,7 @@ export class TaskMainView extends ItemView {
     const latest = this.plugin.index.taskById(task.id);
     const fresh = (latest?.raw === task.raw ? latest : this.plugin.index.tasksForPath(task.path).find(item => item.raw === task.raw)) ?? task;
     this.expanded = { id: fresh.id, title: blank ? "" : fresh.title, notes: cardNotes(fresh.description) };
+    this.cardSource = cardSource(fresh);
     // The card takes the place of the row and its subtask rows; it grows out of the space they filled.
     const replaced = [fresh.id, ...this.expandedDescendants()];
     const from = this.rowElements().filter(row => replaced.includes(row.getAttribute("data-task-id") ?? ""))
@@ -2318,8 +2352,26 @@ export class TaskMainView extends ItemView {
     return this.cardClosing;
   }
 
+  /**
+   * Ids are lines, so a task completed (or added, or deleted) above the open card's task, which moves it, leaves the
+   * card's id to another task: the card follows its own task (the same line, else its title nearest where it was), and
+   * closes once it is gone.
+   */
+  private followCard(): void {
+    const card = this.expanded, source = this.cardSource;
+    if (!card || !source || card.id === NEW_TASK_ID) return;
+    const same = this.plugin.index.taskById(card.id);
+    if (same && (same.raw === source.raw || same.title === source.title)) { this.cardSource = cardSource(same); return; }
+    const near = (tasks: Task[]): Task | undefined => tasks.sort((a, b) => Math.abs(a.line - source.line) - Math.abs(b.line - source.line))[0];
+    const tasks = this.plugin.index.tasksForPath(source.path);
+    const found = near(tasks.filter(task => task.raw === source.raw)) ?? near(tasks.filter(task => task.title === source.title));
+    if (found) { this.expanded = { ...card, id: found.id }; this.cardSource = cardSource(found); }
+    else { this.expanded = undefined; this.cardSource = undefined; }
+  }
+
   /** Writes the card's title and notes when they changed; the card stays open. */
   private async saveCard(): Promise<void> {
+    this.followCard();
     const card = this.expanded;
     const task = card && this.plugin.index.taskById(card.id);
     if (!card || !task) return;
@@ -2333,6 +2385,9 @@ export class TaskMainView extends ItemView {
       await this.plugin.index.refreshPath(task.path);
       if (draft.destination !== draftFromTask(task).destination) await this.plugin.index.refreshPath(draft.destination.split("#")[0]);
       if (this.expanded?.id === card.id) this.expanded = { ...this.expanded, title: draft.title, notes: notes ?? this.expanded.notes };
+      // Its line as saved, unless saving moved it away.
+      const saved = this.plugin.index.taskById(card.id);
+      if (this.expanded?.id === card.id && saved?.title === draft.title) this.cardSource = cardSource(saved);
     } catch (cause) {
       new Notice(cause instanceof Error ? cause.message : "Could not save the task.");
     }
@@ -2500,21 +2555,23 @@ export class TaskMainView extends ItemView {
   private async addCardSubtask(parentId: string, title: string, after: Task | undefined, next: boolean): Promise<void> {
     const parent = this.plugin.index.taskById(parentId);
     if (!parent) return;
+    // The next one starts after it: its line, still focused, follows it as soon as the card is drawn again.
+    const following = (): boolean => next && this.expanded?.id === parentId && !this.cardClosing;
     try {
       // Everything in a new subtask was just typed, so its natural-language dates count too.
       const parsed = parseTaskInput(title, new Date(), this.plugin.dateFormat());
-      await this.plugin.store.addSubtask(parent, parsed?.title.trim() ? parsed : { title }, after);
+      const line = await this.plugin.store.addSubtask(parent, parsed?.title.trim() ? parsed : { title }, after);
+      if (following()) this.expanded = { ...this.expanded!, subtask: { after: `${parent.path}:${line}`, text: this.expanded!.subtask?.text ?? "" } };
       await this.plugin.index.refreshPath(parent.path);
     } catch (cause) {
       new Notice(cause instanceof Error ? cause.message : "Could not add the subtask.");
+      // The line waiting for it takes the next one again.
+      if (following()) this.renderTaskResults();
       return;
     }
-    if (!next || this.expanded?.id !== parentId || this.cardClosing) return;
-    // The new subtask sits right after `after` (or last); the next one starts after it.
-    const children = this.plugin.index.taskById(parentId)?.childIds ?? [];
-    const added = after ? children[children.indexOf(after.id) + 1] : children[children.length - 1];
-    this.expanded = { ...this.expanded, subtask: { after: added, text: "" } };
-    this.cardFocus = "new";
+    if (!following()) return;
+    // Focus left the card (it went with the line it was in): back to the new line.
+    if (!this.content?.contains(this.content.ownerDocument.activeElement)) this.cardFocus = "new";
     this.renderTaskResults();
   }
 
@@ -2637,4 +2694,17 @@ export class TaskMainView extends ItemView {
     empty.createEl("h3", { text: "Nothing here" });
     empty.createEl("p", { text: this.propertyFilters.length ? "No tasks match the current filters." : this.showsCompleted ? "No tasks match this view." : "You're caught up. Completed tasks are hidden." });
   }
+}
+
+/** What the open card remembers of its task to find it again (see TaskMainView.followCard). */
+function cardSource(task: Task): { path: string; line: number; raw: string; title: string } {
+  return { path: task.path, line: task.line, raw: task.raw, title: task.title };
+}
+
+/** A project as its row in a list grouped by `grouping` shows it: without the property that groups it. */
+function withoutGrouped(project: Project, grouping: TaskGrouping): Project {
+  if (grouping === "status") return { ...project, status: undefined };
+  if (grouping === "scheduledDate") return { ...project, scheduledDate: undefined, scheduledTime: undefined };
+  if (grouping === "deadline") return { ...project, deadline: undefined, deadlineTime: undefined };
+  return project;
 }

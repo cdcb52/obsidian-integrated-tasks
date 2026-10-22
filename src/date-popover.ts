@@ -214,7 +214,7 @@ export function openDatePopover(options: DatePopoverOptions): DatePopover {
   place();
 
   // A click outside saves what was typed and closes.
-  const stop = whileOpen(element, () => close(true), { also: [[win, "resize", place]] });
+  const stop = whileOpen(element, () => close(true), { also: [[win, "resize", place]], anchor: options.anchor });
 
   /** `typed` reads the input first (off when a date was just picked, which is what counts). */
   function close(commit = true, typed = true): void {

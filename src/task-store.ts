@@ -19,6 +19,7 @@ import {
   updateTaskInContent
 } from "./markdown";
 import { STATUS_LABELS, draftStatus, isClosedStatus, statusFromLabel } from "./task-status";
+import type { PlacementOptions } from "./completed-placement";
 import type { ParsedTaskMetadata, Task, TaskDraft, TaskManagerSettings, TaskStatus } from "./types";
 
 /** One user action's effect on notes, kept so the action can be undone (and redone) as a unit. */
@@ -77,7 +78,8 @@ export class TaskStore {
     private readonly getNewTaskPosition: () => TaskManagerSettings["newTaskPosition"] = () => "top",
     private readonly getLinkDates: () => boolean = () => true,
     private readonly getSectionHeadingLevel: () => number = () => 1,
-    private readonly getCompletionDates: () => boolean = () => false
+    private readonly getCompletionDates: () => boolean = () => false,
+    private readonly getPlacement: () => Pick<PlacementOptions, "placement" | "section"> = () => ({ placement: "keep", section: "" })
   ) {}
 
   updateDates(sourceFormats: string[]): Promise<string[]> {
@@ -108,6 +110,11 @@ export class TaskStore {
     return this.run(`${completed ? "Completed" : "Reopened"} ${taskName(task.title)}`, async () => {
       if (completed && (recurringFile(this.app, task) || task.repeat)) {
         await this.resolveRecurringNow(task, "COMPLETED");
+        return;
+      }
+      // Completed or reopened, it may move in its note too (Settings › Completed tasks).
+      if (this.places(task, { ...draftForGroup(task), completed })) {
+        await this.bulkChangeNow([task], current => ({ ...draftForGroup(current), completed }));
         return;
       }
       const file = this.requireFile(task.path);
@@ -199,26 +206,29 @@ export class TaskStore {
 
   /**
    * Adds a to-do subtask to `parent`: right after `after` (one of its subtasks, keeping that subtask's
-   * indentation) or, with no `after`, at the end of the parent's block one level deeper.
+   * indentation) or, with no `after`, at the end of the parent's block one level deeper. Resolves to the line it took.
    */
-  addSubtask(parent: Task, subtask: ParsedTaskMetadata, after?: Task): Promise<void> {
+  addSubtask(parent: Task, subtask: ParsedTaskMetadata, after?: Task): Promise<number> {
     return this.run(`Added ${taskName(subtask.title)}`, async () => {
       const file = this.requireFile(parent.path);
+      let added = -1;
       await this.process(file, content => {
         const anchor = liveTaskBlock(content, after ?? parent, this.getDateFormat(), this.getSectionHeadingLevel());
         const indent = after ? /^[ \t]*/.exec(anchor.lines[0])![0] : subtaskIndent(anchor);
         const line = indent + serializeTask({ ...subtask, status: "todo", completed: false, destination: parent.path, indent: 0 }, this.getDateFormat(), this.getLinkDates());
         const lines = content.split(/\r?\n/);
         lines.splice(anchor.end, 0, line);
+        added = anchor.end;
         return lines.join(lineEnding(content));
       });
+      return added;
     });
   }
 
   update(task: Task, draft: TaskDraft): Promise<void> {
     return this.run(`Edited ${taskName(task.title)}`, async () => {
       // Description edits, moves and recurring completions share the planned, all-or-nothing bulk path.
-      if ((draft.description !== undefined && draft.description !== (task.description ?? "")) || isMove(task, draft) || this.completesRecurring(task, draft)) {
+      if ((draft.description !== undefined && draft.description !== (task.description ?? "")) || isMove(task, draft) || this.completesRecurring(task, draft) || this.places(task, draft)) {
         await this.bulkChangeNow([task], () => draft);
         return;
       }
@@ -429,6 +439,11 @@ export class TaskStore {
     return recurringFile(this.app, task) ?? (draft.repeat ? true : undefined);
   }
 
+  /** Whether `draft` completes or reopens the task while Settings › Completed tasks moves such tasks in their notes. */
+  private places(task: Task, draft: TaskDraft): boolean {
+    return this.getPlacement().placement !== "keep" && task.completed !== isClosedStatus(draftStatus(draft));
+  }
+
   /** With completion dates on, a draft that makes a task done records today and one that makes it anything else drops the date, unless the draft sets its own. */
   private stampCompletion(task: Task, draft: TaskDraft): TaskDraft {
     const done = draftStatus(draft) === "done";
@@ -480,7 +495,7 @@ export class TaskStore {
         deadline: change.draft!.deadline === original.deadline ? advanced.task.deadline : change.draft!.deadline };
     }
     for (const change of changes) if (change.draft) change.draft = this.stampCompletion(change.task, change.draft);
-    const planned = planBulkTasks(contents, changes, { ...options, dateFormat: this.getDateFormat(), position: this.getNewTaskPosition(), linkDates: this.getLinkDates(), sectionHeadingLevel: this.getSectionHeadingLevel() });
+    const planned = planBulkTasks(contents, changes, { ...options, dateFormat: this.getDateFormat(), position: this.getNewTaskPosition(), linkDates: this.getLinkDates(), sectionHeadingLevel: this.getSectionHeadingLevel(), completed: this.getPlacement() });
     const after = new Map<string, string>();
     for (const [path, content] of before) {
       const final = planned.get(path) ?? contents.get(path)!;

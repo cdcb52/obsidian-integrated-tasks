@@ -205,6 +205,14 @@ export interface TaskManagerSettings {
   taskDetails: "view" | "sidebar";
   /** Stamp tasks with the date they were completed. */
   completionDates: boolean;
+  /** Where completing a task moves it in its note, and reopening it moves it back (see completed-placement.ts). */
+  completedPlacement: import("./completed-placement").CompletedPlacement;
+  /** The heading completed tasks move under with completedPlacement "section", at the section heading level. */
+  completedSection: string;
+  /** How a group of a note's tasks is named: by its path in the vault ("Folder/Note"), or by the note's name alone. */
+  noteGroupLabel: "path" | "name";
+  /** Projects whose description card is folded on their page. */
+  foldedDescriptions: string[];
   /** Each view's View options, by view: "today", "project:Projects/Site.md", "tag:errand" or "tag:Errands.md". */
   viewOptions: Record<string, SavedViewOptions>;
   /** Each view's layout other than a list, by view as for its options, plus "smartList:<id>" and "projects" (the Projects list's). */
@@ -256,6 +264,10 @@ export const DEFAULT_SETTINGS: TaskManagerSettings = {
   style: "griply",
   taskDetails: "sidebar",
   completionDates: true,
+  completedPlacement: "keep",
+  completedSection: "Task Logs",
+  noteGroupLabel: "path",
+  foldedDescriptions: [],
   viewOptions: {},
   viewLayouts: {},
   viewPeriods: {},

@@ -79,6 +79,14 @@ export function longDate(date: string, now: Date): string {
     return formatDate(date, date.slice(0, 4) === String(now.getFullYear()) ? "ddd, MMM D" : "ddd, MMM D, YYYY");
 }
 
+/**
+ * Runs `leave` when focus leaves `field` while `row` stays in the card. Chromium also fires blur while a redraw removes
+ * the field, with its row still attached, so the row is looked at once the redraw is done.
+ */
+function onLeave(field: HTMLElement, row: HTMLElement, leave: () => void): void {
+    field.addEventListener("blur", () => queueMicrotask(() => { if (row.isConnected) leave(); }));
+}
+
 function autosize(area: HTMLTextAreaElement): void {
     area.setCssStyles({ height: "auto" });
     area.setCssStyles({ height: `${area.scrollHeight}px` });
@@ -93,6 +101,8 @@ export function renderThingsTaskCard(parent: HTMLElement, options: TaskCardOptio
     const now = options.now ?? new Date();
     const card = parent.createDiv({ cls: `tm-things-card tm-task-item${task.completed ? " is-completed" : ""}`, attr: { "data-task-id": task.id, role: "listitem" } });
     card.style.setProperty("--tm-depth", String(options.depth));
+    // A click where nothing takes focus focuses the card, so its keys (Escape) still work there.
+    card.tabIndex = -1;
 
     const head = card.createDiv({ cls: "tm-things-card-head" });
     // A recurring task's checkbox is its repeat icon, as in its row.
@@ -169,11 +179,23 @@ export function renderThingsTaskCard(parent: HTMLElement, options: TaskCardOptio
         newRow = row;
         subtask = { after: after?.id, text };
         let finished = false;
+        // Added, it is written while this line stays, empty and focused, for the next one: the card's next drawing puts
+        // the line after it. Until then Enter waits, so the next one cannot go in before it.
+        let adding = false;
         // Enter adds it and starts the next; leaving it adds it; either way an empty one just goes away.
         const finish = (next: boolean): void => {
             if (finished || cancelled) return;
-            finished = true;
             const value = input.value.trim();
+            if (next && adding) return;
+            if (next && value && options.addChild) {
+                adding = true;
+                input.value = "";
+                subtask = { after: after?.id, text: "" };
+                change();
+                options.addChild(value, after, true);
+                return;
+            }
+            finished = true;
             if (newRow === row) newRow = undefined;
             row.remove();
             subtask = undefined;
@@ -187,7 +209,7 @@ export function renderThingsTaskCard(parent: HTMLElement, options: TaskCardOptio
             finish(true);
         });
         // Only a real blur: a redraw removing the row keeps the text in the draft for the new card.
-        input.addEventListener("blur", () => { if (row.isConnected) finish(false); });
+        onLeave(input, row, () => finish(false));
         commits.push(() => finish(false));
         change();
         return input;
@@ -403,7 +425,7 @@ export function renderAddTag(pills: HTMLElement, adding: TagAdding, open = false
             else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finish(false); pill.focus(); }
             else if (event.key === "ArrowDown" && event.altKey) { event.preventDefault(); event.stopPropagation(); input.menu.click(); }
         });
-        input.field.addEventListener("blur", () => { if (input.wrapper.isConnected) finish(true); });
+        onLeave(input.field, input.wrapper, () => finish(true));
         // Keep focus in the field while pressing the button, so leaving it does not add the text.
         input.menu.addEventListener("mousedown", event => event.preventDefault());
         input.menu.addEventListener("click", event => {

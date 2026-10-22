@@ -33,6 +33,9 @@ async function setup(notes: Array<[string, string]>, frontmatter: Record<string,
     settings, index, store: {}, dateFormat: () => "YYYY-MM-DD", openEditor: vi.fn(), openTaskView: vi.fn().mockResolvedValue(undefined),
     projectDraft: vi.fn(() => ({ tags: "" })),
     updateProject: vi.fn().mockResolvedValue(""), setProjectDescription: vi.fn().mockResolvedValue(undefined), openProjectCreator: vi.fn(),
+    foldDescription: vi.fn(async (path: string, folded: boolean) => {
+      settings.foldedDescriptions = [...settings.foldedDescriptions.filter(item => item !== path), ...folded ? [path] : []];
+    }),
     saveViewOptions: vi.fn((key: string, options?: SavedViewOptions) => { if (options) settings.viewOptions[key] = options; else delete settings.viewOptions[key]; }),
     saveViewLayout: vi.fn((key: string, layout?: ViewLayout) => { if (layout && layout !== "list") settings.viewLayouts[key] = layout; else delete settings.viewLayouts[key]; }),
     saveViewPeriod: vi.fn((key: string, period?: ViewPeriod) => { if (period && Object.keys(period).length) settings.viewPeriods[key] = period; else delete settings.viewPeriods[key]; }),
@@ -145,7 +148,8 @@ describe("The Projects view", () => {
     // A status property says a project's status; without one, its tasks say whether it is done.
     const byStatus = [["To do", []], ["In progress", ["Site"]], ["Waiting", ["Home"]], ["Done", ["Garden"]], ["Cancelled", ["Old"]]];
     expect(sections(content())).toEqual(byStatus);
-    expect(Array.from(content().querySelectorAll(".tm-project-status")).map(status => status.textContent)).toEqual(["In progress", "Waiting", "Cancelled"]);
+    // Each group is a status, so the rows leave theirs out.
+    expect(content().querySelectorAll(".tm-project-status")).toHaveLength(0);
     const button = (key: string) => content().querySelector<HTMLButtonElement>(`[data-tm-focus-key="${key}"]`);
     expect(["layout-list", "layout-kanban", "layout-gantt"].every(key => button(key))).toBe(true);
     expect(button("layout-calendar")).toBeNull();
@@ -162,6 +166,32 @@ describe("The Projects view", () => {
     button("layout-gantt")!.click();
     expect(settings.viewLayouts.projects).toBe("gantt");
     expect(content().querySelectorAll(".tm-gantt-project")).toHaveLength(4);
+  });
+
+  it("leaves the property the projects are grouped by out of their rows and cards", async () => {
+    const { view, settings, content } = await setup(projects(), { ...frontmatter, "Site.md": { ...frontmatter["Site.md"], deadline: "2030-05-01", date: "2030-04-01" } });
+    const shown = () => ({
+      status: Array.from(content().querySelectorAll(".tm-project-status")).map(status => status.textContent),
+      dates: content().querySelectorAll(".tm-project-date-range").length,
+      deadline: content().querySelectorAll(".tm-project-row .tm-task-due").length
+    });
+    const open = async (grouping: "priority" | "deadline" | "scheduledDate" | "default") => {
+      settings.viewOptions.projects = { filters: [], sort: "date", descending: false, grouping };
+      await view.setState({ mode: "all" });
+      await view.setState({ mode: "projects" });
+      return shown();
+    };
+    const all = await open("priority");
+    expect(all.status).toEqual(["In progress", "Waiting", "Cancelled"]);
+    expect(all.dates).toBe(1);
+    expect(all.deadline).toBe(1);
+    expect(await open("deadline")).toEqual({ ...all, deadline: 0 });
+    expect(await open("scheduledDate")).toEqual({ ...all, dates: 0 });
+    // By status, as by default, and on a board too.
+    expect(await open("default")).toEqual({ ...all, status: [] });
+    settings.viewLayouts.projects = "kanban";
+    expect(await open("default")).toEqual({ ...all, status: [] });
+    expect(content().querySelector(".tm-kanban-column .tm-project-row")).not.toBeNull();
   });
 
   it("filters projects with View options limited to a project's properties, kept for the view", async () => {
@@ -198,6 +228,35 @@ describe("The Projects view", () => {
     await view.setState({ mode: "all", pagePath: "Home.md" });
     expect(card().hidden).toBe(true);
     expect(card().previousElementSibling?.classList.contains("has-description")).toBe(false);
+  });
+
+  it("folds a project's description to its first line from its chevron, and keeps it folded on later visits", async () => {
+    const { view, plugin, settings, content } = await setup(projects(), { ...frontmatter, "Site.md": { ...frontmatter["Site.md"], description: "The new website.\nLaunch in spring." } });
+    await view.setState({ mode: "all", pagePath: "Site.md" });
+    const card = () => content().querySelector<HTMLElement>(".tm-project-description")!;
+    const fold = () => card().querySelector<HTMLButtonElement>("button.tm-description-fold")!;
+    expect(fold().getAttribute("aria-expanded")).toBe("true");
+    fold().focus();
+    fold().click();
+    expect(plugin.foldDescription).toHaveBeenCalledExactlyOnceWith("Site.md", true);
+    await vi.waitFor(() => expect(card().classList.contains("is-folded")).toBe(true));
+    // Folding is not editing; focus stays on the chevron.
+    expect(card().querySelector("textarea")).toBeNull();
+    expect(fold().getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(fold());
+    expect(settings.foldedDescriptions).toEqual(["Site.md"]);
+    // Folded on a later visit too; a click on the text still edits it whole.
+    await view.setState({ mode: "all", pagePath: "Home.md" });
+    await view.setState({ mode: "all", pagePath: "Site.md" });
+    expect(card().classList.contains("is-folded")).toBe(true);
+    card().querySelector<HTMLElement>(".tm-project-description-text")!.click();
+    expect(card().classList.contains("is-folded")).toBe(false);
+    expect(card().querySelector("textarea")!.value).toBe("The new website.\nLaunch in spring.");
+    card().querySelector("textarea")!.dispatchEvent(new FocusEvent("blur"));
+    // Unfolded from its chevron again.
+    fold().click();
+    await vi.waitFor(() => expect(card().classList.contains("is-folded")).toBe(false));
+    expect(settings.foldedDescriptions).toEqual([]);
   });
 });
 
@@ -257,10 +316,11 @@ describe("Convert to smart list", () => {
     expect(plugin.saveSmartList).toHaveBeenCalledWith({ name: "Urgent today", filters: [{ property: "priority", operator: "is", values: ["1"] }],
       sort: "date", descending: false, grouping: "default", scope: { mode: "today" } });
 
-    // The list shows Today's P1 tasks, grouped as Today groups them; a smart list offers no conversion of its own.
+    // The list shows Today's P1 tasks, grouped as Today groups them (nothing overdue: under no heading); a smart list
+    // offers no conversion of its own.
     await view.setState({ mode: "smartLists", smartListId: "new" });
     expect(titles(content())).toEqual(["Urgent today"]);
-    expect(Array.from(content().querySelectorAll(".tm-section > h2")).map(heading => heading.textContent)).toContain("Today");
+    expect(content().querySelectorAll(".tm-section > h2")).toHaveLength(0);
     expect(content().querySelector(".tm-options-convert")).toBeNull();
     // So does a task-query block that names it.
     const parsed = parseTaskQuery("smart list: Urgent today", { sourcePath: "Note.md", dateFormat: "YYYY-MM-DD", smartLists: settings.smartLists, resolveNote: () => undefined });

@@ -13,6 +13,7 @@ import { createTaskRow, dropEmptyRowParts } from "./task-row";
 import { renderThingsTaskDetails } from "./things-row-details";
 import { renderThingsBoardCard } from "./things-task-card";
 import { STATUS_LABELS } from "./task-status";
+import { noteGroupName } from "./structure";
 import type { Task, TaskGrouping } from "./types";
 
 type QueryHost = Pick<TaskManagerPlugin, "app" | "index" | "store" | "settings" | "dateFormat" | "openEditor" | "openTask" | "startTask" | "openTaskView" | "openTag">;
@@ -183,7 +184,7 @@ export class TaskQueryBlock extends MarkdownRenderChild {
 
   private groupTitle(key: string, grouping: TaskGrouping): string {
     if (/^\d{4}-\d{2}-\d{2}$/.test(key)) return formatDate(key, this.plugin.dateFormat());
-    return grouping === "source" ? key.replace(/\.md$/i, "").split("/").pop()! : key;
+    return grouping === "source" ? noteGroupName(key, this.plugin.settings.noteGroupLabel) : key;
   }
 
   private depth(task: Task, visible: Set<string>): number {

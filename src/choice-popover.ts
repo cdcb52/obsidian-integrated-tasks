@@ -151,7 +151,7 @@ export function openChoicePopover(options: ChoicePopoverOptions): { element: HTM
 
   placePopover(element, options.anchor, options.beside);
 
-  const stop = whileOpen(element, () => close());
+  const stop = whileOpen(element, () => close(), { anchor: options.anchor });
   function close(): void {
     if (!stop()) return;
     element.remove();
@@ -173,12 +173,19 @@ export function openChoicePopover(options: ChoicePopoverOptions): { element: HTM
 /**
  * What every popover and menu listens for while open: a press outside it (as `inside` tells) calls `outside`, and so do
  * any `also` events (a menu closes when the window loses focus; a popover moves when it resizes, with its own listener).
- * Returns the popover's stop: it removes the listeners and answers true the first time, so closing runs once.
+ * A press on the button it opened from (`anchor`) closes it too, and nothing more: the click that follows does not open
+ * it again. Returns the popover's stop: it removes the listeners and answers true the first time, so closing runs once.
  */
-export function whileOpen(element: HTMLElement, outside: () => void, options: { inside?: (target: Element | null) => boolean; also?: Array<[EventTarget, string, () => void]> } = {}): () => boolean {
+export function whileOpen(element: HTMLElement, outside: () => void, options: { inside?: (target: Element | null) => boolean; also?: Array<[EventTarget, string, () => void]>; anchor?: HTMLElement } = {}): () => boolean {
   const doc = element.ownerDocument;
   const inside = options.inside ?? (target => element.contains(target));
-  const press = (event: PointerEvent): void => { if (!inside(event.target as Element | null)) outside(); };
+  const toggle = options.anchor && toggles(options.anchor) ? options.anchor : undefined;
+  const press = (event: PointerEvent): void => {
+    const target = event.target as Element | null;
+    if (inside(target)) return;
+    if (toggle && onAnchor(toggle, target)) swallowClick(doc, toggle);
+    outside();
+  };
   const also = options.also ?? [];
   doc.addEventListener("pointerdown", press, true);
   for (const [target, type, listener] of also) target.addEventListener(type, listener);
@@ -190,6 +197,37 @@ export function whileOpen(element: HTMLElement, outside: () => void, options: { 
     for (const [target, type, listener] of also) target.removeEventListener(type, listener);
     return true;
   };
+}
+
+/** Buttons, and what reads as one (a property's value, a menu item), close the popover they opened when pressed again. */
+function toggles(anchor: HTMLElement): boolean {
+  return anchor.matches("button, [role=button], [role=menuitem]");
+}
+
+/** `target` is on the anchor, or on the control that took its place when its view was drawn again meanwhile. */
+function onAnchor(anchor: HTMLElement, target: Element | null): boolean {
+  if (!target) return false;
+  if (anchor.contains(target)) return true;
+  const key = anchor.getAttribute("data-tm-focus-key");
+  return !anchor.isConnected && Boolean(key) && target.closest?.("[data-tm-focus-key]")?.getAttribute("data-tm-focus-key") === key;
+}
+
+/** Stops the click that ends a press on `anchor` from reaching it; a press that ends elsewhere lets it go. */
+function swallowClick(doc: Document, anchor: HTMLElement): void {
+  const key = anchor.getAttribute("data-tm-focus-key");
+  const click = (event: MouseEvent): void => {
+    stop();
+    const target = event.target as Element | null;
+    if (!target || !(anchor.contains(target) || (key && target.closest?.("[data-tm-focus-key]")?.getAttribute("data-tm-focus-key") === key))) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  };
+  const timer = (doc.defaultView ?? window).setTimeout(() => stop(), 1000);
+  function stop(): void {
+    doc.removeEventListener("click", click, true);
+    (doc.defaultView ?? window).clearTimeout(timer);
+  }
+  doc.addEventListener("click", click, true);
 }
 
 /** How each open popover closes on Escape, so a modal can close it the same way without sending a key. */

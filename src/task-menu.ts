@@ -42,6 +42,8 @@ export interface ActionMenuOptions {
   entries: ActionMenuEntry[];
   /** Focused again when the menu closes with focus inside it (the row it acts on). */
   returnFocus?: HTMLElement;
+  /** The button it opened from, which closes it when pressed again. */
+  anchor?: HTMLElement;
   onClose?: () => void;
 }
 
@@ -201,7 +203,7 @@ export function openActionMenu(options: ActionMenuOptions): TaskMenu {
   }
 
   // A press in one of its submenus' popovers counts as inside it.
-  const stop = whileOpen(element, () => close(), { inside: target => element.contains(target) || Boolean(target?.closest?.(SUBMENUS)), also: [[win, "blur", () => close()]] });
+  const stop = whileOpen(element, () => close(), { inside: target => element.contains(target) || Boolean(target?.closest?.(SUBMENUS)), also: [[win, "blur", () => close()]], anchor: options.anchor });
   function close(): void {
     if (!stop()) return;
     const hadFocus = element.contains(doc.activeElement);
@@ -286,7 +288,7 @@ export function openTagsPopover(options: TagsPopoverOptions): { element: HTMLEle
   paint();
   placePopover(element, options.anchor, options.beside);
 
-  const stop = whileOpen(element, () => close());
+  const stop = whileOpen(element, () => close(), { anchor: options.anchor });
   function close(): void {
     if (!stop()) return;
     element.remove();

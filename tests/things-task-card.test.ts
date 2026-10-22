@@ -256,7 +256,15 @@ describe("Things task card", () => {
     expect(options.change).toHaveBeenLastCalledWith(expect.objectContaining({ subtask: { after: one.id, text: "One and a half" } }));
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     expect(options.addChild).toHaveBeenCalledExactlyOnceWith("One and a half", one, true);
-    expect(element.querySelector(".is-new")).toBeNull();
+    // Its line stays, emptied and focused, for the next one until the card is drawn again with it; a second Enter
+    // meanwhile adds nothing more.
+    const waiting = element.querySelector<HTMLInputElement>(".is-new .tm-things-card-check-title")!;
+    expect(waiting).toBe(input);
+    expect(waiting.value).toBe("");
+    expect(element.ownerDocument.activeElement).toBe(waiting);
+    waiting.value = "Too soon";
+    waiting.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(options.addChild).toHaveBeenCalledOnce();
   });
 
   it("starts the first subtask from the Checklist button, and an empty one just goes away", () => {

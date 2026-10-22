@@ -2731,6 +2731,9 @@ button.tm-options-update:disabled { color: var(--text-faint); cursor: default; }
 /* A project page's description, in a card under the whole header, shaded as the layout switcher is. */
 .tm-view-header.has-description { margin-bottom: var(--size-4-3); }
 .tm-project-description {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--size-4-2);
   margin-bottom: var(--size-4-8);
   padding: var(--size-4-3) var(--size-4-4);
   border-radius: var(--radius-m);
@@ -2743,6 +2746,12 @@ button.tm-options-update:disabled { color: var(--text-faint); cursor: default; }
   cursor: text;
 }
 .tm-project-description[hidden] { display: none; }
+/* Its chevron, before the text, folds it to its first line (it stays folded on later visits). */
+.tm-project-description > button.tm-description-fold {
+  position: static; flex-shrink: 0; height: 1lh; opacity: 1; transform: none; color: var(--text-muted);
+}
+.tm-project-description-text { flex: 1; min-width: 0; }
+.tm-project-description.is-folded .tm-project-description-text { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .tm-project-description-input {
   display: block; width: 100%; min-height: 3lh; padding: 0; border: 0; resize: none; overflow: hidden;
   background: transparent; box-shadow: none; color: inherit; font: inherit; line-height: inherit;

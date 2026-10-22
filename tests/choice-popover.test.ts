@@ -54,6 +54,55 @@ describe("priority popover", () => {
   });
 });
 
+describe("pressing the button a popover opened from", () => {
+  const press = (target: Element) => {
+    target.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
+    target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  };
+
+  it("closes it, without the click opening it again, as for a date in the task details", () => {
+    const button = document.body.createEl("button", { text: "Today" });
+    const save = vi.fn();
+    let open: ReturnType<typeof openDatePopover> | undefined;
+    const opened = vi.fn(() => { open = openDatePopover({ anchor: button, kind: "scheduled", value: {}, dateFormat: "YYYY-MM-DD", save }); });
+    button.addEventListener("click", opened);
+    button.click();
+    expect(open!.element.isConnected).toBe(true);
+    press(button.createSpan({ text: "icon" }));
+    expect(open!.element.isConnected).toBe(false);
+    expect(opened).toHaveBeenCalledOnce();
+    // The next press opens it again.
+    press(button);
+    expect(opened).toHaveBeenCalledTimes(2);
+    expect(open!.element.isConnected).toBe(true);
+  });
+
+  it("closes a choice popover the same way, while a press on something else that is no button just closes it", () => {
+    const button = document.body.createEl("button", { text: "P2", attr: { "data-tm-focus-key": "priority" } });
+    const opened = vi.fn(() => openChoicePopover({ anchor: button, label: "Priority", choices: PRIORITY_CHOICES, choose: vi.fn() }));
+    button.addEventListener("click", opened);
+    button.click();
+    press(button);
+    expect(opened).toHaveBeenCalledOnce();
+    expect(document.querySelector(".tm-choice-popover")).toBeNull();
+    // Drawn again while it was open, the button that took its place closes it too.
+    button.click();
+    const redrawn = document.body.createEl("button", { text: "P2", attr: { "data-tm-focus-key": "priority" } });
+    redrawn.addEventListener("click", opened);
+    button.remove();
+    press(redrawn);
+    expect(opened).toHaveBeenCalledTimes(2);
+    expect(document.querySelector(".tm-choice-popover")).toBeNull();
+    // A popover anchored on a row's text (no button) leaves that click alone.
+    const { anchor } = priority();
+    const clicked = vi.fn();
+    anchor.addEventListener("click", clicked);
+    press(anchor);
+    expect(document.querySelector(".tm-choice-popover")).toBeNull();
+    expect(clicked).toHaveBeenCalledOnce();
+  });
+});
+
 describe("closing with their view", () => {
   it("closes, without saving, the popovers opened from inside a view, then every one", () => {
     const view = document.body.createDiv();

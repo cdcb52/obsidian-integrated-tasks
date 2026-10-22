@@ -43,3 +43,16 @@ it("does not parse lines that were not checked", () => {
   expect(isRecurring).not.toHaveBeenCalled();
   expect(scanTasks).not.toHaveBeenCalled();
 });
+
+it("moves a task checked or unchecked in the note as Completed tasks says, in the same change, stamped", () => {
+  const doc = "# Plan\n- [ ] One\n- [ ] Two\n# Later";
+  const placed = (placement: "keep" | "bottom" | "section") => EditorState.create({ doc, extensions: noteRecurringCompletion(() => "YYYY-MM-DD", () => false, vi.fn(), () => "Project.md",
+    { enabled: () => true, linkDates: () => false }, () => 1, () => ({ placement, section: "Task Logs" })) });
+  expect(check(placed("keep"), 2).newDoc.toString()).toMatch(/^# Plan\n- \[x\] One ✓\S+\n- \[ \] Two\n# Later$/);
+  expect(check(placed("bottom"), 2).newDoc.toString()).toMatch(/^# Plan\n- \[ \] Two\n- \[x\] One ✓\S+\n# Later$/);
+  const logged = check(placed("section"), 2);
+  expect(logged.newDoc.toString()).toMatch(/^# Plan\n- \[ \] Two\n# Later\n\n# Task Logs\n\n## Plan\n- \[x\] One ✓\S+$/);
+  // Unchecked there, it goes back to the top of its section, without its date.
+  const reopened = logged.state.update({ changes: { from: logged.newDoc.line(8).from + 3, to: logged.newDoc.line(8).from + 4, insert: " " } });
+  expect(reopened.newDoc.toString()).toBe("# Plan\n- [ ] One\n- [ ] Two\n# Later\n\n# Task Logs");
+});

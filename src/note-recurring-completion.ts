@@ -1,10 +1,11 @@
-import { EditorState, StateEffect, Transaction, type Extension, type ChangeSpec, type Line } from "@codemirror/state";
+import { ChangeSet, EditorState, StateEffect, Transaction, type Extension, type ChangeSpec, type Line } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { editorInfoField } from "obsidian";
 import { todayIso } from "./date";
 import { parseTaskLine, scanTasks, withCompletedDate } from "./parser";
 import { nonBodyLines } from "./structure";
 import { STATUS_CHARS } from "./task-status";
+import { placeChangedTasks, type PlacementOptions } from "./completed-placement";
 import type { RecurringOutcome } from "./recurring-task";
 import type { Task } from "./types";
 
@@ -58,7 +59,8 @@ function lineChange(from: number, before: string, after: string): ChangeSpec {
 /**
  * Catch native checkbox commands (and typed checks or `-`) without persisting a closed instance of a
  * repeating task: it is completed (`[x]`) or cancelled (`[-]`) instead; with completion dates on, stamp other
- * checked tasks and unstamp reopened ones.
+ * checked tasks and unstamp reopened ones. With `placement` (Settings › Completed tasks), a task checked or unchecked
+ * moves in the note as it says.
  */
 export function noteRecurringCompletion(
     getDateFormat: () => string,
@@ -66,7 +68,8 @@ export function noteRecurringCompletion(
     complete: (task: Task, outcome: RecurringOutcome) => void,
     getPath: (state: EditorState) => string | undefined = state => state.field(editorInfoField, false)?.file?.path,
     completionDates?: NoteCompletionDates,
-    getSectionHeadingLevel: () => number = () => 1
+    getSectionHeadingLevel: () => number = () => 1,
+    placement: () => Pick<PlacementOptions, "placement" | "section"> | undefined = () => undefined
 ): Extension {
     return [
         EditorState.transactionFilter.of(transaction => {
@@ -126,6 +129,20 @@ export function noteRecurringCompletion(
                     const next = withCompletedDate(mapped.text, completing ? today : undefined, getDateFormat(), completionDates.linkDates(), reference);
                     if (next !== mapped.text) changes.push(lineChange(mapped.from, mapped.text, next));
                 }
+            }
+            // Opened or closed (checked done, or cancelled), a task moves where Settings › Completed tasks puts it; one that
+            // repeats is put back open above, and stays.
+            const moving = transaction.annotation(Transaction.remote) ? undefined : placement();
+            const placed = moving && moving.placement !== "keep" ? flipped.filter(entry => isClosed(entry.before) !== isClosed(entry.after)
+                && !reverted.has(entry.line.number - 1) && !recurringLines.has(entry.line.number - 1)) : [];
+            if (placed.length) {
+                const text = transaction.newDoc.toString();
+                const stamped = changes.length ? ChangeSet.of(changes, transaction.newDoc.length).apply(transaction.newDoc).toString() : text;
+                const nonBody = nonBodyLines(transaction.newDoc.iterLines());
+                const lines = placed.map(entry => ({ line: transaction.newDoc.lineAt(transaction.changes.mapPos(entry.line.from)).number - 1, closed: isClosed(entry.after) }))
+                    .filter(entry => !nonBody.has(entry.line));
+                const next = lines.length ? placeChangedTasks(path, stamped, lines, { ...moving!, sectionHeadingLevel: getSectionHeadingLevel(), dateFormat: getDateFormat() }) : stamped;
+                if (next !== stamped) changes.splice(0, changes.length, lineChange(0, text, next));
             }
             if (!changes.length) return transaction;
             return [transaction, { changes, ...(tasks.length ? { effects: recurringCompletion.of(tasks) } : {}), sequential: true }];
