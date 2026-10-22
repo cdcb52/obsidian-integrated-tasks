@@ -735,12 +735,24 @@ describe("three panes (Task details › Three panes: in the sidebar)", () => {
     expect(side().querySelector(".tm-sidebar-property.is-p1")).toBeNull();
     expect(view.getSelectedTasks()).toEqual([]);
 
+    // Create task does as Enter does: nothing until titled, then written, the next one taking its place.
+    const button = () => side().querySelector<HTMLButtonElement>(".tm-sidebar-create button")!;
+    expect(button().textContent).toBe("Create task");
+    button().click();
+    await settle();
+    expect(store.create).toHaveBeenCalledOnce();
+    type("Book flights");
+    button().click();
+    await vi.waitFor(() => expect(contents.get("A.md")).toBe("- [ ] Book flights\n- [ ] Buy milk p1\n- [ ] Existing"));
+    await vi.waitFor(() => expect(title().value).toBe(""));
+    expect(document.activeElement).toBe(title());
+
     // Selecting another task writes one left titled; that task stays selected though its line moved.
     type("Call Sam");
     rows(main()).find(row => row.textContent?.includes("Existing"))!.click();
-    await vi.waitFor(() => expect(contents.get("A.md")).toBe("- [ ] Call Sam\n- [ ] Buy milk p1\n- [ ] Existing"));
+    await vi.waitFor(() => expect(contents.get("A.md")).toBe("- [ ] Call Sam\n- [ ] Book flights\n- [ ] Buy milk p1\n- [ ] Existing"));
     await vi.waitFor(() => expect(view.getSelectedTasks().map(task => task.title)).toEqual(["Existing"]));
-    expect(store.create).toHaveBeenCalledTimes(2);
+    expect(store.create).toHaveBeenCalledTimes(3);
     expect(plugin.openEditor).not.toHaveBeenCalled();
   });
 });

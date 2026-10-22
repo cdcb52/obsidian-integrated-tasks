@@ -1015,17 +1015,25 @@ export class TaskSidebarView extends ItemView {
       } else if (event.key === "Enter" && !event.isComposing && (!event.shiftKey || event.metaKey || event.ctrlKey)) {
         event.preventDefault();
         if (!isNew) target.blur();
-        else if (title.value.trim()) void host.finishNewTask(true, true).then(() => this.focusNewTask());
+        else create();
       }
     });
+    /** Writes the new task once titled, and the next one takes its place; untitled, the caret goes back to its title. */
+    const create = (): void => {
+      if (title.value.trim()) void host.finishNewTask(true, true).then(() => this.focusNewTask());
+      else title.focus();
+    };
     const fit = (): void => { autosize(title); autosize(notes); };
     if (panel.isConnected) fit();
     // The frame of the window it's in: a pop-out's, not the main window's, which may be in the background.
     (panel.ownerDocument.defaultView ?? window).requestAnimationFrame(fit);
     this.saveOnLeave(panel, ".tm-sidebar-title-field, .tm-sidebar-notes");
 
-    // A new task's subtasks wait until it is written.
+    // A new task's subtasks wait until it is written; Create task writes it, as Enter does (and as a new project's button).
     if (!isNew) this.renderSubtasks(panel, task);
+    else panel.createDiv({ cls: "tm-sidebar-footer tm-sidebar-create" })
+      .createEl("button", { cls: "mod-cta", text: "Create task", attr: { type: "button", "data-tm-focus-key": "sidebar-task-create" } })
+      .addEventListener("click", create);
   }
 
   /**
