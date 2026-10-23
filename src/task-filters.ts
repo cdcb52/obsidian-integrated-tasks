@@ -35,7 +35,7 @@ export const UNDATED_FILTERS: readonly TaskFilter[] = [
   { property: "scheduledDate", operator: "missing", values: [] },
   { property: "deadline", operator: "missing", values: [] }
 ];
-const DATE_PROPERTIES = new Set<TaskProperty>(["scheduledDate", "scheduledTime", "deadline", "deadlineTime"]);
+const DATE_PROPERTIES = new Set<TaskProperty>(["date", "scheduledDate", "scheduledTime", "deadline", "deadlineTime"]);
 
 /** A view's filters narrowed to its tasks without a date: any on dates give way to No date for both. */
 export function undatedFilters(filters: readonly TaskFilter[]): TaskFilter[] {

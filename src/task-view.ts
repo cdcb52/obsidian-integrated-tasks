@@ -34,7 +34,7 @@ import { ListDragController } from "./list-drag-view";
 import { HeadingDragController } from "./heading-drag";
 import { draftForGroup, isStructuralGroup, taskGroupTarget, type ListDropGroup, type ListPlacement } from "./list-drag";
 import { renderCalendar } from "./calendar-view";
-import { addDays, daysBetween, rescheduledDraft, type CalendarScope } from "./calendar";
+import { addDays, calendarRange, daysBetween, rescheduledDraft, type CalendarScope } from "./calendar";
 import { STATUS_ICONS, STATUS_LABELS, TASK_STATUSES, isClosedStatus, statusFromLabel } from "./task-status";
 import { ItemView, Keymap, Menu, Notice, Platform, setIcon, TFile, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
 import { actionDate, formatDate, parseDateExpression, todayIso } from "./date";
@@ -241,6 +241,13 @@ export class TaskMainView extends ItemView {
     if (this.isProjectsView) return false;
     if (this.state.mode === "smartLists" && !this.plugin.settings.smartLists.some(list => list.id === this.state.smartListId)) return false;
     return true;
+  }
+
+  /** The first and last dates its calendar shows (Today's: today), for the Task Details sidebar; none without one. */
+  get calendarRange(): [string, string] | undefined {
+    if (!this.hasCalendar) return undefined;
+    const today = this.state.mode === "today" && !this.pagePath;
+    return calendarRange(today ? todayIso() : this.calendarAnchor, today ? "day" : this.calendarScope);
   }
 
   private get taskSourcePath(): string | undefined { return this.state.mode === "tags" ? undefined : this.pagePath; }
@@ -823,6 +830,8 @@ export class TaskMainView extends ItemView {
           this.calendarAnchor = anchor; this.calendarScope = scope;
           if (changed) this.savePeriod();
           this.renderTaskResults();
+          // The sidebar's Smart Context lists the dates shown.
+          this.plugin.refreshTaskSidebar?.();
         },
         create: preset => this.newTask(preset),
         edit: task => this.editTask(task),

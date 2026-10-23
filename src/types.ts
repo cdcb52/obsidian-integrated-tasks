@@ -71,7 +71,8 @@ export interface TaskViewState {
   markdownState?: Record<string, unknown>;
 }
 
-export type TaskProperty = "tags" | "title" | "priority" | "scheduledDate" | "scheduledTime" | "deadline" | "deadlineTime" | "repeat" | "completed" | "duration" | "source" | "section" | "status";
+/** `date`: the action date, the scheduled date or the deadline, whichever comes first. */
+export type TaskProperty = "tags" | "title" | "priority" | "date" | "scheduledDate" | "scheduledTime" | "deadline" | "deadlineTime" | "repeat" | "completed" | "duration" | "source" | "section" | "status";
 export type TaskSort = "date" | TaskProperty;
 export type TaskGrouping = "default" | "none" | "date" | TaskProperty;
 export type FilterOperator = "has" | "missing" | "is" | "isNot" | "contains" | "before" | "after" | "between";

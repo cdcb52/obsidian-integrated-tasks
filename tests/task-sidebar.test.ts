@@ -389,14 +389,25 @@ describe("what the Task Details sidebar shows", () => {
     expect(titles()).toEqual(viewOrder);
   });
 
-  it("lists All Tasks beside another view's calendar and Today's list beside Today's, which is today's hours alone", async () => {
+  it("lists only the dates a calendar shows beside it (but Upcoming's), and Today's list beside Today's, which is today's hours alone", async () => {
     const today = todayIso();
-    const { view, sidebar, main, side } = await setup([["A.md", [`- [ ] At nine ${today} 09:00`, "- [ ] No date"].join("\n")]]);
+    const later = todayIso(new Date(Date.now() + 2 * 86400000));
+    const { view, sidebar, main, side } = await setup([["A.md", [`- [ ] At nine ${today} 09:00`, "- [ ] No date", `- [ ] Due later {${later}}`, "- [ ] Far off 2999-01-01", "- [ ] Overdue 2020-01-01"].join("\n")]]);
     expect(sidebar.getIcon()).toBe("circle-check-big");
     const listed = () => Array.from(side().querySelectorAll(".tm-sidebar-planner .tm-task-item .tm-task-title")).map(title => title.textContent);
-    await view.setState({ mode: "all", layout: "calendar" });
-    expect(listed()).toEqual(["At nine", "No date"]);
-    // Today's calendar, whatever scope was kept: no date, buttons or scopes above the hours; beside it, Today's list.
+    const shownFilter = () => (sidebar as unknown as { idleState(): { filters: unknown[] } }).idleState().filters;
+    // A day: that day's tasks, as a filter on their action date the View options show.
+    await view.setState({ mode: "all", layout: "calendar", calendarScope: "day", calendarAnchor: today });
+    expect(listed()).toEqual(["At nine"]);
+    expect(shownFilter()).toEqual([{ property: "date", operator: "between", values: [today, today] }]);
+    expect(side().querySelector(".tm-sidebar-planner-head .tm-options-badge")!.textContent).toBe("1");
+    // Four days, from the calendar's buttons: the list follows.
+    main().querySelector<HTMLButtonElement>('.tm-calendar-scopes button[aria-label="4 days"]')!.click();
+    expect(listed()).toEqual(["At nine", "Due later"]);
+    // Upcoming's calendar keeps its tasks without a date.
+    await view.setState({ mode: "upcoming", layout: "calendar", calendarScope: "day", calendarAnchor: today });
+    expect(listed()).toEqual(["No date"]);
+    // Today's calendar, whatever scope was kept: no date, buttons or scopes above the hours; beside it, Today's list, today's only.
     await view.setState({ mode: "today", layout: "calendar", calendarScope: "month" });
     expect(main().querySelector(".tm-calendar.is-day-scope")).not.toBeNull();
     expect(main().querySelector(".tm-calendar-toolbar")).toBeNull();
@@ -404,9 +415,11 @@ describe("what the Task Details sidebar shows", () => {
     expect(side().classList.contains("is-calendar")).toBe(false);
     expect(side().querySelector(".tm-sidebar-planner .tm-calendar")).toBeNull();
     expect(listed()).toEqual(["At nine"]);
-    // Today's list layout: Today's calendar beside it again.
+    // Today's list layout: Today's calendar beside it again; a list layout adds no dates.
     await view.setState({ mode: "today", layout: "list" });
     expect(side().querySelector(".tm-sidebar-planner .tm-calendar.is-day-scope")).not.toBeNull();
+    await view.setState({ mode: "all", layout: "list" });
+    expect(listed()).toEqual(["Overdue", "At nine", "Due later", "Far off", "No date"]);
   });
 
   it("takes the dates off a card dragged from Upcoming's calendar into the tasks without a date", async () => {

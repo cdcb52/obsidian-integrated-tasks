@@ -454,21 +454,24 @@ export class TaskSidebarView extends ItemView {
 
   /**
    * Smart Context: All Tasks (by note, as its view groups them), its View options set for what is in front. Beside
-   * Today, Today's calendar (or, beside Today's calendar, Today's list: overdue, then today); beside Upcoming, both dates No date (tasks dropped there lose theirs); beside a note (task
-   * mode off), its Note that note; beside a note's task view (task mode on), by action date.
+   * Today, Today's calendar (or, beside Today's calendar, Today's list); beside Upcoming, both dates No date (tasks dropped there lose theirs); beside a note (task
+   * mode off), its Note that note; beside a note's task view (task mode on), by action date. Beside a calendar (but
+   * Upcoming's) only the dates it shows, by their action date.
    */
   private contextView(): IdleView {
     const base = { label: "Smart Context", query: { mode: "all", showCompleted: false } as TaskQuery, sort: "date" as const, descending: false, group: "source" as const };
     const view = this.taskView();
     const mode = view?.getState().mode;
+    const range = view?.calendarRange;
+    const shown: TaskFilter[] | undefined = range && [{ property: "date", operator: "between", values: [...range] }];
     if (view && !view.pagePath && mode === "today") {
-      return view.hasCalendar ? { ...base, key: "context:today-list", query: { mode: "today", showCompleted: false }, group: "today" } : { ...base, key: "context:today", calendar: true };
+      return view.hasCalendar ? { ...base, key: "context:today-list", query: { mode: "today", showCompleted: false }, group: "today", pinned: shown } : { ...base, key: "context:today", calendar: true };
     }
     if (view && !view.pagePath && mode === "upcoming") return { ...base, key: "context:upcoming", filters: UNDATED_FILTERS, undated: true, empty: ["calendar-check", "Every task has a date"] };
-    if (view?.pagePath) return { ...base, key: "context:page", group: "date" };
+    if (view?.pagePath) return { ...base, key: "context:page", group: "date", pinned: shown };
     const note = view ? undefined : this.note.noteView()?.file?.path;
     if (note) return { ...base, key: "context:note", pinned: [{ property: "source", operator: "is", values: [note] }], empty: ["file-text", "No tasks in this note"] };
-    return { ...base, key: "context:all" };
+    return { ...base, key: "context:all", pinned: shown };
   }
 
   /** The list's own View options, kept with the views' options for each list it can show (and each Smart Context). */

@@ -59,7 +59,7 @@ const GROUPS: Array<[TaskGrouping, string]> = [
 export const groupingLabel = (grouping: TaskGrouping): string => GROUPS.find(([value]) => value === grouping)?.[1] ?? grouping;
 const SECTIONS: Array<[string, Array<[TaskProperty, string, string]>]> = [
   ["Status & priority", [["status", "Status", "circle-dot"], ["priority", "Priority", "flag"]]],
-  ["Dates", [["scheduledDate", "Scheduled", "calendar"], ["scheduledTime", "Scheduled time", "clock"], ["deadline", "Deadline", "calendar-clock"],
+  ["Dates", [["date", "Action date", "calendar-range"], ["scheduledDate", "Scheduled", "calendar"], ["scheduledTime", "Scheduled time", "clock"], ["deadline", "Deadline", "calendar-clock"],
     ["deadlineTime", "Deadline time", "alarm-clock"], ["completed", "Completed", "check-check"]]],
   ["Details", [["tags", "Tags", "tag"], ["duration", "Duration", "timer"], ["repeat", "Repeat", "repeat"], ["title", "Title", "text"]]],
   ["Location", [["source", "Note", "file-text"], ["section", "Heading", "heading"]]]

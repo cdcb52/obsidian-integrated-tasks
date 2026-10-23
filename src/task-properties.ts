@@ -1,10 +1,10 @@
 import { formatTags } from "./task-tags";
 import { formatDuration, repeatLabel } from "./parser";
 import { STATUS_LABELS, statusFromLabel } from "./task-status";
-import { todayIso } from "./date";
+import { actionDate, todayIso } from "./date";
 import type { FilterOperator, Task, TaskFilter, TaskProperty } from "./types";
 
-const DATE_PROPERTIES = new Set<TaskProperty>(["scheduledDate", "deadline", "completed"]);
+const DATE_PROPERTIES = new Set<TaskProperty>(["date", "scheduledDate", "deadline", "completed"]);
 
 /**
  * Date filter values may be relative — `today`, `today+7`, `today-1` — so a saved smart list such as
@@ -20,6 +20,7 @@ export function resolveDateToken(value: string, now = new Date()): string {
 export const TASK_PROPERTIES: { key: TaskProperty; label: string; kind: "text" | "choice" | "date" | "time" | "number" }[] = [
   { key: "title", label: "Title", kind: "text" },
   { key: "status", label: "Status", kind: "choice" },
+  { key: "date", label: "Action date", kind: "date" },
   { key: "scheduledDate", label: "Scheduled date", kind: "date" },
   { key: "scheduledTime", label: "Scheduled time", kind: "time" },
   { key: "duration", label: "Duration", kind: "number" },
@@ -39,6 +40,7 @@ export function propertyValue(task: Task, property: TaskProperty): string | numb
   if (property === "source") return task.path;
   if (property === "duration") return task.durationMinutes;
   if (property === "completed") return task.completedDate;
+  if (property === "date") return actionDate(task);
   return task[property];
 }
 

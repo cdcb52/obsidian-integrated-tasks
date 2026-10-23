@@ -103,6 +103,7 @@ The Task details sidebar sits in Obsidian's right sidebar. It shows the task you
 - **A note:** the note's tasks (the Note filter follows the note in front). Put the cursor on a checklist line to see and edit its details.
 - **A note's task view (task mode on):** all tasks, by action date.
 - **Anything else:** all tasks, by note.
+- **A calendar (except Upcoming's):** only the dates the calendar shows, as an **Action date** filter that follows the calendar as you move it.
 
 Smart Context keeps the filter, sort and grouping you choose for each of these. A selected task shows its title, properties, notes and subtasks, all editable in place. With several tasks selected, change a property once and every selected task follows.
 

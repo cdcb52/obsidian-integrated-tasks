@@ -41,6 +41,14 @@ export function calendarDays(anchor: string, scope: "week" | "month"): string[] 
   const start = formatLocalDate(date);
   return Array.from({ length: scope === "week" ? 7 : 42 }, (_, index) => addDays(start, index));
 }
+/** The first and last dates a calendar of `scope` shows around `anchor` (a month's whole weeks). */
+export function calendarRange(anchor: string, scope: CalendarScope): [string, string] {
+  if (scope === "day") return [anchor, anchor];
+  if (scope === "four-day") return [anchor, addDays(anchor, 3)];
+  if (scope === "year") return [`${anchor.slice(0, 4)}-01-01`, `${anchor.slice(0, 4)}-12-31`];
+  const days = calendarDays(anchor, scope);
+  return [days[0], days[days.length - 1]];
+}
 export function shiftCalendar(anchor: string, scope: CalendarScope, direction: number): string {
   if (scope === "four-day") return addDays(anchor, direction * 4);
   if (scope === "day" || scope === "week") return addDays(anchor, direction * (scope === "week" ? 7 : 1));
