@@ -389,19 +389,24 @@ describe("what the Task Details sidebar shows", () => {
     expect(titles()).toEqual(viewOrder);
   });
 
-  it("lists All Tasks beside another view's calendar, and Today's calendar is today's hours alone", async () => {
+  it("lists All Tasks beside another view's calendar and Today's list beside Today's, which is today's hours alone", async () => {
     const today = todayIso();
     const { view, sidebar, main, side } = await setup([["A.md", [`- [ ] At nine ${today} 09:00`, "- [ ] No date"].join("\n")]]);
     expect(sidebar.getIcon()).toBe("circle-check-big");
     const listed = () => Array.from(side().querySelectorAll(".tm-sidebar-planner .tm-task-item .tm-task-title")).map(title => title.textContent);
     await view.setState({ mode: "all", layout: "calendar" });
     expect(listed()).toEqual(["At nine", "No date"]);
-    // Today's calendar, whatever scope was kept: no date, buttons or scopes above the hours; beside it, Today's calendar too.
+    // Today's calendar, whatever scope was kept: no date, buttons or scopes above the hours; beside it, Today's list.
     await view.setState({ mode: "today", layout: "calendar", calendarScope: "month" });
     expect(main().querySelector(".tm-calendar.is-day-scope")).not.toBeNull();
     expect(main().querySelector(".tm-calendar-toolbar")).toBeNull();
     expect(Array.from(main().querySelectorAll(".tm-calendar-lane .tm-calendar-task-title")).map(title => title.textContent)).toEqual(["At nine"]);
-    expect(side().classList.contains("is-calendar")).toBe(true);
+    expect(side().classList.contains("is-calendar")).toBe(false);
+    expect(side().querySelector(".tm-sidebar-planner .tm-calendar")).toBeNull();
+    expect(listed()).toEqual(["At nine"]);
+    // Today's list layout: Today's calendar beside it again.
+    await view.setState({ mode: "today", layout: "list" });
+    expect(side().querySelector(".tm-sidebar-planner .tm-calendar.is-day-scope")).not.toBeNull();
   });
 
   it("takes the dates off a card dragged from Upcoming's calendar into the tasks without a date", async () => {
