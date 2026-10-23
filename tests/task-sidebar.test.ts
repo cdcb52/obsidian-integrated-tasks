@@ -397,9 +397,10 @@ describe("what the Task Details sidebar shows", () => {
     await view.setState({ mode: "all", layout: "calendar" });
     expect(listed()).toEqual(["No date", "Also undated"]);
     expect(side().querySelector(".tm-sidebar-planner-head .tm-options-badge")!.textContent).toBe("2");
-    // A project's calendar too: All Tasks without a date, not only the project's.
+    // A project's calendar: the project's tasks without a date, its Note the project's.
     await view.setState({ mode: "all", pagePath: "A.md", layout: "calendar" });
-    expect(listed()).toEqual(["No date", "Also undated"]);
+    expect(listed()).toEqual(["No date"]);
+    expect(side().querySelector(".tm-sidebar-planner-head .tm-options-badge")!.textContent).toBe("3");
     // Today's calendar, whatever scope was kept: no date, buttons or scopes above the hours; beside it, the same list.
     await view.setState({ mode: "today", layout: "calendar", calendarScope: "month" });
     expect(main().querySelector(".tm-calendar.is-day-scope")).not.toBeNull();
