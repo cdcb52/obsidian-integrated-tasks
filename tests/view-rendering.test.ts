@@ -231,19 +231,19 @@ describe("re-rendering", () => {
       content().querySelector<HTMLButtonElement>('[data-tm-focus-key="option-status"]')!.click();
       return options;
     };
-    content().querySelector<HTMLButtonElement>(".tm-filter-toggle")!.click();
+    view.containerEl.querySelector<HTMLButtonElement>(".tm-filter-toggle")!.click();
     expect(checked()).toEqual(["View default", "To do", "In progress", "Waiting"]);
     (view as unknown as { grouping: string }).grouping = "status";
     view.render();
     expect(Array.from(content().querySelectorAll(".tm-task-item .tm-task-title")).map(title => title.textContent)).toEqual(["Open", "Shipped", "Dropped"]);
-    content().querySelector<HTMLButtonElement>(".tm-filter-toggle")!.click();
+    view.containerEl.querySelector<HTMLButtonElement>(".tm-filter-toggle")!.click();
     expect(checked()).toEqual(["View default", "To do", "In progress", "Waiting", "Done", "Cancelled"]);
   });
 
   it("keeps the options panel, an open dropdown and a half-built filter when tasks change", async () => {
     const { view, internals, content } = await setup([note("A.md", 3)]);
     await view.setState({ mode: "all" });
-    content().querySelector<HTMLButtonElement>(".tm-filter-toggle")!.click();
+    view.containerEl.querySelector<HTMLButtonElement>(".tm-filter-toggle")!.click();
     const panel = content().querySelector(".tm-options-panel")!;
     content().querySelector<HTMLButtonElement>('[data-tm-focus-key="option-title"]')!.click();
     content().querySelector<HTMLElement>(".tm-options-option.is-action")!.click();

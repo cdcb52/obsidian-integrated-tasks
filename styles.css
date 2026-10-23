@@ -19,7 +19,6 @@
 
 .tm-nav-header,
 .tm-view-header,
-.tm-header-actions,
 .tm-title-group,
 .tm-task-primary,
 .tm-task-metadata,
@@ -206,11 +205,6 @@ body.is-mobile .tm-navigation .tm-nav-item { -webkit-touch-callout: none; -webki
 .tm-title-row { display: flex; align-items: center; gap: var(--size-4-1); min-width: 0; }
 .tm-title-row .tm-title-more { flex: 0 0 auto; color: var(--text-muted); }
 .tm-title-row .tm-title-more[aria-expanded="true"] { background: var(--background-modifier-hover); color: var(--text-normal); }
-
-.tm-header-actions {
-  flex: 0 0 auto;
-  gap: var(--size-4-4);
-}
 
 .tm-section {
   margin-bottom: var(--size-4-8);
@@ -461,11 +455,6 @@ button.tm-task-title {
     margin-bottom: var(--size-4-6);
   }
 
-  .tm-header-actions {
-    width: 100%;
-    justify-content: space-between;
-  }
-
   .tm-editor-field {
     grid-template-columns: 1fr;
     gap: var(--size-4-1);
@@ -531,7 +520,6 @@ button.tm-task-title {
   .tm-view-header { gap: 12px; margin-bottom: 24px; }
   .tm-title-group, .tm-title-group > div { min-width: 0; max-width: 100%; }
   .tm-main-view h1.tm-page-title { overflow-wrap: anywhere; }
-  .tm-header-actions { gap: 8px; flex-wrap: wrap; }
 
    .tm-title-group .clickable-icon { min-height: 44px; min-width: 44px; }
 
@@ -870,39 +858,6 @@ body.is-mobile .tm-main-view .tm-task-item { -webkit-touch-callout: none; -webki
 .tm-task-list.tm-drop-only:empty { min-height: 0; }
 button.tm-list-drag-handle { touch-action: none; }
 
-.tm-layout-controls {
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-  gap: 2px;
-  height: var(--input-height, 30px);
-  box-sizing: border-box;
-  padding: 2px;
-  border-radius: 999px;
-  background: var(--background-modifier-hover);
-}
-.tm-layout-controls button.clickable-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 100%;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  box-shadow: none;
-  color: var(--text-muted);
-}
-.tm-layout-controls button.clickable-icon svg { width: 16px; height: 16px; }
-.tm-layout-controls button.clickable-icon:hover { color: var(--text-normal); }
-.tm-layout-controls button.clickable-icon[aria-pressed="true"] {
-  background: var(--background-primary);
-  color: var(--text-normal);
-  box-shadow: var(--shadow-s);
-}
-.tm-layout-controls button.clickable-icon:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 1px; }
 .workspace-leaf-content[data-type="task-manager-main"] .view-content.tm-main-view.is-kanban-view { max-width: none; width: 100%; }
 .tm-kanban { display: flex; align-items: stretch; gap: 16px; overflow-x: auto; padding: 4px 2px 16px; min-height: 320px; }
 .tm-kanban-column { flex: 1 0 280px; min-width: 280px; max-width: 360px; background: transparent; border: 0; border-radius: 10px; padding: 12px; }
@@ -1771,10 +1726,8 @@ body .modal-container .modal.tm-bottom-sheet.is-top::before { top: auto; bottom:
 
 /* View options panel: a popover of sort, group and filter rows under the header's filter button. */
 .tm-view-header { position: relative; }
-button.tm-filter-toggle { position: relative; display: inline-flex; align-items: center; justify-content: center; }
-/* View options sits at the right, also when a narrow header spreads its buttons across the width. */
-.tm-header-actions > button.tm-filter-toggle { margin-inline-start: auto; }
-button.tm-filter-toggle.is-active { background: var(--background-modifier-hover); color: var(--text-normal); }
+.tm-filter-toggle { position: relative; display: inline-flex; align-items: center; justify-content: center; }
+.tm-filter-toggle.is-active { background: var(--background-modifier-hover); color: var(--text-normal); }
 .tm-options-toggle-icon { display: inline-flex; }
 .tm-options-badge {
   position: absolute; top: 0; right: 0; min-width: 16px; height: 16px; padding: 0 4px;
@@ -1790,6 +1743,22 @@ button.tm-filter-toggle.is-active { background: var(--background-modifier-hover)
   background: var(--background-secondary); box-shadow: var(--shadow-l); overflow: hidden;
 }
 .tm-options-panel[hidden] { display: none; }
+/* A task view's opens under its button in the tab's header (placed there as it opens). */
+.tm-options-panel.is-under-toggle { position: fixed; top: var(--tm-options-top, 80px); right: var(--tm-options-right, 8px); }
+/* Layout: List, Calendar, Kanban (or Gantt), one pressed. */
+.tm-options-layouts {
+  display: flex; gap: 2px; height: var(--input-height, 30px); box-sizing: border-box; padding: 2px;
+  border-radius: 999px; background: var(--background-modifier-hover);
+}
+.tm-options-layouts button {
+  display: flex; flex: 1 1 0; align-items: center; justify-content: center; gap: 6px; height: 100%; min-height: 0; padding: 0 10px;
+  border: 0; border-radius: 999px; background: transparent; box-shadow: none; color: var(--text-muted); font-size: var(--font-ui-small);
+}
+.tm-options-layouts button .tm-options-icon { display: inline-flex; color: inherit; }
+.tm-options-layouts button svg { width: 14px; height: 14px; }
+.tm-options-layouts button:hover { color: var(--text-normal); }
+.tm-options-layouts button[aria-pressed="true"] { background: var(--background-primary); color: var(--text-normal); box-shadow: var(--shadow-s); }
+.tm-options-layouts button:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 1px; }
 .tm-options-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--background-modifier-border); }
 .tm-options-header h2 { margin: 0; font-size: var(--font-ui-medium); font-weight: var(--font-semibold); }
 button.tm-options-clear { padding: 4px 8px; border: 0; background: transparent; box-shadow: none; color: var(--text-accent); font-size: var(--font-ui-small); cursor: pointer; }
@@ -2584,6 +2553,8 @@ button.tm-things-card-project:hover, button.tm-things-card-project:focus-visible
   padding: var(--size-4-3) var(--size-4-3) var(--size-4-6);
 }
 .tm-sidebar-pane { display: flex; flex-direction: column; gap: var(--size-4-3); }
+/* Its toolbar, as the task navigation's, at the top above whatever it shows. */
+.tm-task-sidebar .tm-sidebar-toolbar { flex: 0 0 auto; margin: calc(-1 * var(--size-4-3)) calc(-1 * var(--size-4-3)) var(--size-4-2); }
 /* With Today or Upcoming open, their tasks fill the sidebar, or with a task shown (and no drag of tasks under way), its
    details do: one at a time. */
 .workspace-leaf-content[data-type="task-manager-sidebar"] .view-content.tm-task-sidebar:is(.is-today, .is-upcoming) { overflow: hidden; padding-bottom: var(--size-4-3); }

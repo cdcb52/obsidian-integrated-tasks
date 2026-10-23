@@ -24,7 +24,7 @@ import type { OpenEditorState } from "./main";
 import { groupingLabel, ViewOptionsPanel, type ViewOptionsState } from "./view-options";
 import { dismissPopovers, openChoicePopover } from "./choice-popover";
 import { cloneTaskFilters } from "./task-filters";
-import { listGlyph, SMART_LIST_GLYPH, TAG_GLYPH } from "./navigation-view";
+import { listGlyph, navIcon, SMART_LIST_GLYPH, TAG_GLYPH } from "./navigation-view";
 import { activeProjects, renderProjectProgress } from "./project-progress";
 import { openProjectDraftProperty } from "./project-menu";
 import { projectColorValue } from "./project-properties";
@@ -281,12 +281,27 @@ export class TaskSidebarView extends ItemView {
     container.toggleClass("tm-style-griply", settings.style === "griply");
     container.toggleClass("tm-density-compact", settings.density === "compact");
     for (const name of ["today", "upcoming", "details", "note"] as const) container.toggleClass(`is-${name}`, mode === name);
+    this.buildToolbar(container);
     this.plannerHead = mode === "upcoming" ? this.buildUndatedHead(container) : undefined;
     if (!this.plannerHead) this.undatedPanel = undefined;
     this.planner = mode === "details" ? undefined : { element: container.createDiv({ cls: "tm-sidebar-planner", attr: { "data-tm-scroll-key": "sidebar-planner" } }) };
     if (mode === "upcoming") this.takeUndatedDrops(this.planner!.element);
     this.details = { element: container.createDiv({ cls: "tm-sidebar-pane", attr: { "data-tm-scroll-key": "sidebar-details" } }) };
     this.skeleton = skeleton;
+  }
+
+  /** A toolbar at the top, as the task navigation's: New task and New project, which with three panes open here. */
+  private buildToolbar(container: HTMLElement): void {
+    const toolbar = container.createDiv({ cls: "nav-header tm-nav-header tm-sidebar-toolbar" })
+      .createDiv({ cls: "nav-buttons-container", attr: { role: "toolbar", "aria-label": "Task details actions" } });
+    for (const [label, icon, run] of [
+      ["New task", "circle-plus", () => this.plugin.newTask()],
+      ["New project", "square-chart-gantt", () => this.plugin.openProjectCreator()]
+    ] as const) {
+      const button = toolbar.createEl("button", { cls: "clickable-icon nav-action-button", attr: { type: "button", "aria-label": label, title: label, "data-tm-focus-key": `sidebar-${label.toLowerCase().replace(" ", "-")}` } });
+      navIcon(button, icon);
+      button.addEventListener("click", () => run());
+    }
   }
 
   private draw(section: Section, drawn: string, force: boolean, render: () => void): void {

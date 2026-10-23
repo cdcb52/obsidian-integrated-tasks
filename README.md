@@ -88,7 +88,7 @@ The task sidebar lists these views with your smart lists, projects, tags and you
 
 ### Filter, sort and group
 
-Click the filter button at the top of a view to open **View options**. Pick several statuses, priorities, tags or notes at once, or a date range such as **Overdue**, **Today** or **Next 7 days**. Date ranges stay relative, so "Next 7 days" always means the coming week. **More conditions…** adds anything else: "is not", a range between two dates, or conditions joined with AND and OR.
+Click the filter button in a view's tab header, beside Obsidian's own buttons, to open **View options**. Pick several statuses, priorities, tags or notes at once, or a date range such as **Overdue**, **Today** or **Next 7 days**. Date ranges stay relative, so "Next 7 days" always means the coming week. **More conditions…** adds anything else: "is not", a range between two dates, or conditions joined with AND and OR.
 
 Each view remembers its own options and layout. To keep a setup, choose **Convert to smart list** at the bottom of View options and give it a name. Smart lists appear in the task sidebar under **All Tasks** and update as your tasks change. To change a smart list later, adjust its View options and choose **Update smart list** at the bottom.
 
@@ -108,7 +108,7 @@ With **Task details** set to three panes, new tasks open here: Enter writes one 
 
 ## Choose a layout
 
-Every task view switches between list, calendar and Kanban with the buttons at its top right.
+Every task view switches between list, calendar and Kanban under **Layout** in its View options.
 
 ### List
 
@@ -120,7 +120,7 @@ You can also drop tasks on the task sidebar: on **Inbox**, a project or a note t
 
 ![A month calendar of all tasks, coloured by project, with tasks that have no date listed in the sidebar](resources/images/calendar-month.png)
 
-See your tasks across four days, a week or a month (day and year views are in the command palette). A task sits on its scheduled date, or on its deadline if it has no scheduled date, tinted with its project's colour.
+See your tasks across a day, four days, a week or a month (the year view is in the command palette). On phones a calendar opens on a single day. A task sits on its scheduled date, or on its deadline if it has no scheduled date, tinted with its project's colour.
 
 Drag a task to another day or time to reschedule it. In the day, 4-day and week layouts, drag across empty time to create a task, or drag the edge of a timed task to change how long it takes. Tasks with a date but no time sit in the row above the hours.
 

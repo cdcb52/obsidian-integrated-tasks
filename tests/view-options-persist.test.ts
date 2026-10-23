@@ -53,7 +53,8 @@ async function setup(notes: Array<[string, string]>, frontmatter: Record<string,
 const titles = (container: HTMLElement) => Array.from(container.querySelectorAll(".tm-task-item .tm-task-title")).map(title => title.textContent);
 /** Picks P1 in View options › Priority. */
 function filterP1(content: HTMLElement): void {
-  content.querySelector<HTMLButtonElement>(".tm-filter-toggle")!.click();
+  // Its button is in the tab's header, beside the view's content.
+  content.parentElement!.querySelector<HTMLButtonElement>(".tm-filter-toggle")!.click();
   content.querySelector<HTMLButtonElement>("[data-tm-focus-key='option-priority']")!.click();
   content.querySelector<HTMLElement>(".tm-options-dropdown [data-value='1']")!.click();
 }
@@ -71,7 +72,7 @@ describe("View options kept for each view", () => {
     await view.setState({ mode: "all" });
     expect(titles(content())).toEqual(["Urgent", "Later", "Page", "Copy"]);
     await view.setState({ mode: "all", pagePath: "Site.md" });
-    content().querySelector<HTMLButtonElement>(".tm-filter-toggle")!.click();
+    view.containerEl.querySelector<HTMLButtonElement>(".tm-filter-toggle")!.click();
     content().querySelector<HTMLButtonElement>("[data-tm-focus-key='option-sort']")!.click();
     content().querySelector<HTMLElement>(".tm-options-dropdown [data-value='title']")!.click();
     expect(Object.keys(settings.viewOptions).sort()).toEqual(["project:Site.md", "today"]);
@@ -79,8 +80,8 @@ describe("View options kept for each view", () => {
     // Back on Today, its filter is there again.
     await view.setState({ mode: "today" });
     expect(titles(content())).toEqual(["Urgent"]);
-    expect(content().querySelector(".tm-options-badge")!.textContent).toBe("1");
-    content().querySelector<HTMLButtonElement>(".tm-filter-toggle")!.click();
+    expect(view.containerEl.querySelector(".tm-options-badge")!.textContent).toBe("1");
+    view.containerEl.querySelector<HTMLButtonElement>(".tm-filter-toggle")!.click();
     content().querySelector<HTMLButtonElement>(".tm-options-clear")!.click();
     expect(settings.viewOptions.today).toBeUndefined();
     await view.setState({ mode: "all", pagePath: "Site.md" });
@@ -142,6 +143,19 @@ describe("The Projects view", () => {
     (section.querySelector("h2 > span") ?? section.querySelector("h2"))!.textContent, Array.from(section.querySelectorAll(".tm-task-title")).map(title => title.textContent)
   ]);
 
+  it("puts View options' button in the tab's header, once, and the layouts in View options", async () => {
+    const { view, content } = await setup([["A.md", "- [ ] Call"]]);
+    await view.setState({ mode: "today" });
+    await view.setState({ mode: "upcoming" });
+    expect(content().querySelector(".tm-filter-toggle")).toBeNull();
+    expect(view.containerEl.children[0].querySelectorAll(".tm-filter-toggle")).toHaveLength(1);
+    const pressed = () => Array.from(content().querySelectorAll<HTMLElement>(".tm-options-layouts button[aria-pressed='true']")).map(button => button.textContent);
+    expect(pressed()).toEqual(["List"]);
+    content().querySelector<HTMLButtonElement>('.tm-options-layouts [data-tm-focus-key="layout-kanban"]')!.click();
+    expect(view.getState().layout).toBe("kanban");
+    expect(pressed()).toEqual(["Kanban"]);
+    expect(view.containerEl.children[0].querySelectorAll(".tm-filter-toggle")).toHaveLength(1);
+  });
   it("lists and boards projects by their status, every status a group, and has no calendar", async () => {
     const { view, plugin, settings, content } = await setup(projects(), frontmatter);
     await view.setState({ mode: "projects" });
@@ -197,7 +211,7 @@ describe("The Projects view", () => {
   it("filters projects with View options limited to a project's properties, kept for the view", async () => {
     const { view, settings, content } = await setup(projects(), frontmatter);
     await view.setState({ mode: "projects" });
-    content().querySelector<HTMLButtonElement>(".tm-filter-toggle")!.click();
+    view.containerEl.querySelector<HTMLButtonElement>(".tm-filter-toggle")!.click();
     expect(content().querySelector("[data-tm-focus-key='option-status']")).not.toBeNull();
     expect(content().querySelector("[data-tm-focus-key='option-repeat']")).toBeNull();
     expect(content().querySelector("[data-tm-focus-key='option-convert']")).toBeNull();
@@ -261,13 +275,13 @@ describe("The Projects view", () => {
 });
 
 describe("Calendar scope and Gantt range kept for each view", () => {
-  it("opens a calendar on four days on a phone", async () => {
+  it("opens a calendar on a single day on a phone", async () => {
     const platform = Platform as { isPhone?: boolean };
     platform.isPhone = true;
     try {
       const { view, settings } = await setup([["A.md", "- [ ] Call"]]);
       await view.setState({ mode: "today", layout: "calendar" } as never);
-      expect((view.getState() as { calendarScope?: string }).calendarScope).toBe("four-day");
+      expect((view.getState() as { calendarScope?: string }).calendarScope).toBe("day");
       expect(settings.viewPeriods.today).toBeUndefined();
     } finally { platform.isPhone = false; }
   });

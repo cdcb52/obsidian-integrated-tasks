@@ -94,8 +94,8 @@ function projectAsTask(project: Project, tags: string[], today: string, status: 
   };
 }
 
-/** A calendar opens on a month, or on a phone, whose screen has no room for one, on four days. */
-function defaultCalendarScope(): CalendarScope { return Platform.isPhone ? "four-day" : "month"; }
+/** A calendar opens on a month, or on a phone, whose screen has no room for one, on a single day. */
+function defaultCalendarScope(): CalendarScope { return Platform.isPhone ? "day" : "month"; }
 
 /** What the Projects view's View options filter, sort and group by: the properties a project has. */
 const PROJECT_PROPERTIES: readonly TaskProperty[] = ["status", "priority", "scheduledDate", "deadline", "tags", "title"];
@@ -190,6 +190,8 @@ export class TaskMainView extends ItemView {
   private rovingRow?: HTMLElement;
   private moveTargets = new Map<string, { title: string; target: ListDropGroup }>();
   private viewOptions?: ViewOptionsPanel;
+  /** View options' button, in the tab's header beside Obsidian's own (drawn again with the view). */
+  private optionsToggle?: HTMLElement;
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: TaskManagerPlugin) {
     super(leaf);
@@ -589,6 +591,8 @@ export class TaskMainView extends ItemView {
     this.headerMetadata = undefined;
     this.headerDescription = undefined;
     this.viewOptions = undefined;
+    this.optionsToggle?.remove();
+    this.optionsToggle = undefined;
     this.liveRegion = container.createDiv({ cls: "tm-sr-only", attr: { "aria-live": "polite" } });
     container.addClass("tm-main-view");
     container.classList.toggle("tm-density-compact", this.plugin.settings.density === "compact");
@@ -605,8 +609,8 @@ export class TaskMainView extends ItemView {
       container.createDiv({ cls: "tm-empty", text: "This smart list no longer exists." });
       return;
     }
-    const viewOptions = this.renderHeader(container);
-    this.renderFilters(container, viewOptions);
+    this.renderHeader(container);
+    this.renderFilters(container);
     this.taskResults = container.createDiv({ cls: "tm-task-results" });
     this.renderTaskResults();
   }
@@ -1021,7 +1025,7 @@ export class TaskMainView extends ItemView {
     if (!items.length && !headings.length) this.renderEmpty(container);
   }
 
-  private renderHeader(container: HTMLElement): HTMLButtonElement {
+  private renderHeader(container: HTMLElement): void {
     const header = container.createDiv({ cls: "tm-view-header" });
     const titleGroup = header.createDiv({ cls: "tm-title-group" });
     if (this.state.projectPath && !this.state.pagePath) {
@@ -1047,31 +1051,9 @@ export class TaskMainView extends ItemView {
     }
     this.headerMetadata = heading.createDiv({ cls: "tm-task-metadata tm-project-metadata tm-project-header-metadata" });
 
-    const actions = header.createDiv({ cls: "tm-header-actions" });
-    const projects = this.isProjectsView;
-    const layouts = actions.createDiv({ cls: "tm-layout-controls", attr: { "aria-label": projects ? "Projects layout" : "Task view layout" } });
-    // The Projects view has a Gantt in place of a calendar.
-    for (const [layout, icon, label] of [["list", "list", "List"], ...projects ? [] : [["calendar", "calendar-days", "Calendar"] as const], ["kanban", "columns-3", "Kanban"], ...projects ? [["gantt", "chart-gantt", "Gantt"] as const] : []] as const) {
-      const pressed = layout === "gantt" ? this.isGantt : this.layout === layout && !this.isGantt;
-      const button = layouts.createEl("button", { cls: "clickable-icon", attr: { "aria-label": `${label} view`, title: `${label} view`, "aria-pressed": String(pressed), "data-tm-focus-key": `layout-${layout}` } });
-      setIcon(button, icon);
-      button.addEventListener("click", () => {
-        if (layout === "gantt") {
-          // The Gantt opens at the start of the year, for an overview of it.
-          if (!this.isGantt) this.ganttAnchor = ganttYearStart(todayIso());
-          this.projectLayout = "gantt";
-        } else {
-          this.layout = layout;
-          this.projectLayout = "list";
-        }
-        this.saveLayout(); this.render();
-      });
-    }
-    const toggle = actions.createEl("button", { cls: "tm-filter-toggle clickable-icon", attr: { "aria-label": "View options: filter, sort, and group", "data-tm-focus-key": "view-options" } });
     // A project's description, in a card under the whole header.
     this.headerDescription = container.createDiv({ cls: "tm-project-description" });
     this.renderHeaderMetadata();
-    return toggle;
   }
 
   /** Opens a project's note in this tab, as the file explorer opens a file; Cmd/Ctrl (`event`) opens a new tab. */
@@ -1399,8 +1381,34 @@ export class TaskMainView extends ItemView {
     return "None";
   }
 
-  private renderFilters(container: HTMLElement, toggle: HTMLButtonElement): void {
-    this.viewOptions = new ViewOptionsPanel(toggle.closest<HTMLElement>(".tm-view-header") ?? container, toggle, {
+  /**
+   * View options: its button in the tab's header, beside Obsidian's own; its panel opens under it, however far the
+   * view is scrolled (it stays in the view, to keep its focus as the view redraws).
+   */
+  private renderFilters(container: HTMLElement): void {
+    const toggle = this.optionsToggle = this.addAction("list-filter", "View options: filter, sort, and group", () => {});
+    toggle.addClass("tm-filter-toggle");
+    toggle.setAttribute("data-tm-focus-key", "view-options");
+    const projects = this.isProjectsView;
+    this.viewOptions = new ViewOptionsPanel(container, toggle, {
+      underToggle: true,
+      // The Projects view has a Gantt in place of a calendar.
+      layouts: {
+        options: projects ? [["list", "List", "list"], ["kanban", "Kanban", "columns-3"], ["gantt", "Gantt", "chart-gantt"]]
+          : [["list", "List", "list"], ["calendar", "Calendar", "calendar-days"], ["kanban", "Kanban", "columns-3"]],
+        current: () => this.isGantt ? "gantt" : this.layout,
+        choose: layout => {
+          if (layout === "gantt") {
+            // The Gantt opens at the start of the year, for an overview of it.
+            if (!this.isGantt) this.ganttAnchor = ganttYearStart(todayIso());
+            this.projectLayout = "gantt";
+          } else {
+            this.layout = layout as "list" | "calendar" | "kanban";
+            this.projectLayout = "list";
+          }
+          this.saveLayout(); this.render();
+        }
+      },
       state: () => ({
         sort: this.sort, descending: this.descending, grouping: this.grouping, filters: this.propertyFilters,
         // Completed tasks are left out unless shown or a status filter asks, on boards too; the Projects view lists every project.

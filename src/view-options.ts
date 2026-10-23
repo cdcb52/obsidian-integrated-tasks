@@ -29,6 +29,10 @@ export interface ViewOptionsHost {
   updateSmartList?: { changed(): boolean; save(): void };
   /** The properties the view's items have (the Projects view's), when not every task property: only these are offered. */
   properties?: readonly TaskProperty[];
+  /** The layouts the view switches between (value, label, icon), offered first; choosing one redraws the view. */
+  layouts?: { options: ReadonlyArray<readonly [string, string, string]>; current(): string; choose(layout: string): void };
+  /** The button sits in the tab's header, outside the view: the panel opens under it, wherever the view is scrolled. */
+  underToggle?: boolean;
 }
 
 type Property = typeof TASK_PROPERTIES[number];
@@ -154,9 +158,10 @@ export class ViewOptionsPanel {
   private readonly summaries = new Map<string, HTMLButtonElement>();
   private readonly editors = new Map<TaskProperty, HTMLElement>();
   private readonly badge: HTMLElement;
+  private readonly layoutButtons = new Map<string, HTMLButtonElement>();
   private dropdown?: { element: HTMLElement; button: HTMLElement; spec: DropdownSpec; render(): void };
 
-  constructor(anchor: HTMLElement, private readonly toggle: HTMLButtonElement, private readonly host: ViewOptionsHost) {
+  constructor(anchor: HTMLElement, private readonly toggle: HTMLElement, private readonly host: ViewOptionsHost) {
     // Action date, None and View default apply to anything; other choices only where the items have the property.
     const offered = (value: string): boolean => !host.properties || value === "date" || value === "default" || value === "none" || host.properties.includes(value as TaskProperty);
     toggle.empty();
@@ -165,7 +170,7 @@ export class ViewOptionsPanel {
     toggle.setAttribute("aria-haspopup", "dialog");
     toggle.addEventListener("click", () => this.setOpen(!this.host.expanded()));
 
-    this.panel = anchor.createDiv({ cls: "tm-options-panel", attr: { role: "dialog", "aria-label": "View options" } });
+    this.panel = anchor.createDiv({ cls: `tm-options-panel${host.underToggle ? " is-under-toggle" : ""}`, attr: { role: "dialog", "aria-label": "View options" } });
     const header = this.panel.createDiv({ cls: "tm-options-header" });
     header.createEl("h2", { text: "View options" });
     this.clearButton = header.createEl("button", { cls: "tm-options-clear", text: "Clear all", attr: { type: "button", "data-tm-focus-key": "clear-filters" } });
@@ -178,6 +183,19 @@ export class ViewOptionsPanel {
       this.setOpen(false);
       this.toggle.focus();
     });
+
+    // Layout: one button for each, as a segmented control.
+    const layouts = host.layouts;
+    if (layouts) {
+      const choices = this.section("Layout").createDiv({ cls: "tm-options-layouts", attr: { role: "group", "aria-label": "Layout" } });
+      for (const [value, label, icon] of layouts.options) {
+        const button = choices.createEl("button", { attr: { type: "button", "data-tm-focus-key": `layout-${value}` } });
+        setIcon(button.createSpan({ cls: "tm-options-icon", attr: { "aria-hidden": "true" } }), icon);
+        button.createSpan({ text: label });
+        button.addEventListener("click", () => { if (layouts.current() !== value) { this.closeDropdown(false); layouts.choose(value); } });
+        this.layoutButtons.set(value, button);
+      }
+    }
 
     const sorting = this.section("Sort & group");
     const sortRow = this.row(sorting, "arrow-up-down", "Sort");
@@ -263,6 +281,11 @@ export class ViewOptionsPanel {
     const { filters, descending } = this.host.state();
     const open = this.host.expanded();
     this.panel.hidden = !open;
+    if (open && this.host.underToggle) {
+      const box = this.toggle.getBoundingClientRect();
+      this.panel.style.setProperty("--tm-options-top", `${box.bottom + 6}px`);
+      this.panel.style.setProperty("--tm-options-right", `${Math.max(8, this.toggle.ownerDocument.documentElement.clientWidth - box.right)}px`);
+    }
     this.toggle.setAttribute("aria-expanded", String(open));
     this.toggle.toggleClass("is-active", open);
     const label = `View options: filter, sort, and group${filters.length ? ` (${filters.length} active ${filters.length === 1 ? "filter" : "filters"})` : ""}`;
@@ -276,6 +299,8 @@ export class ViewOptionsPanel {
     this.showSection.hidden = state.showProjects === undefined;
     this.projectsSwitch.toggleClass("is-enabled", state.showProjects === true);
     this.projectsSwitch.setAttribute("aria-checked", String(state.showProjects === true));
+    const layout = this.host.layouts?.current();
+    for (const [value, button] of this.layoutButtons) button.setAttribute("aria-pressed", String(value === layout));
     this.directionButton.empty();
     setIcon(this.directionButton, descending ? "arrow-down-wide-narrow" : "arrow-up-narrow-wide");
     this.directionButton.setAttribute("aria-label", descending ? "Descending" : "Ascending");

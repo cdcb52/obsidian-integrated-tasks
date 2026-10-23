@@ -109,6 +109,18 @@ function noteView(file: TFile, contents: Map<string, string>, caret: { from: num
 const settle = () => new Promise(resolve => setTimeout(resolve, 0));
 
 describe("what the Task Details sidebar shows", () => {
+  it("has New task and New project in its toolbar, through the plugin's commands", async () => {
+    const { view, side, plugin } = await setup([["A.md", "- [ ] Call"]]);
+    Object.assign(plugin, { newTask: vi.fn(), openProjectCreator: vi.fn() });
+    await view.setState({ mode: "today" });
+    const buttons = Array.from(side().querySelectorAll<HTMLButtonElement>(".tm-sidebar-toolbar button"));
+    expect(buttons.map(button => button.getAttribute("aria-label"))).toEqual(["New task", "New project"]);
+    buttons[0].click();
+    buttons[1].click();
+    expect((plugin as unknown as { newTask: ReturnType<typeof vi.fn> }).newTask).toHaveBeenCalledOnce();
+    expect((plugin as unknown as { openProjectCreator: ReturnType<typeof vi.fn> }).openProjectCreator).toHaveBeenCalledOnce();
+  });
+
   it("follows the task view in front: today's hours for Today, the tasks with no date for Upcoming, else the selected task", async () => {
     const today = todayIso();
     const { view, sidebar, side, setActive, contents } = await setup([["A.md", [`- [ ] At nine ${today} 09:00`, `- [ ] Due today ${today}`, "- [ ] No date", "  - [ ] Its subtask", `- [ ] Only a deadline {${today}}`, "- [ ] Another undated"].join("\n")]]);

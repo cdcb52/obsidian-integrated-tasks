@@ -41,6 +41,15 @@ export class ItemView {
     this.containerEl.append(document.createElement("div"), document.createElement("div"));
     document.body.appendChild(this.containerEl);
   }
+  /** A button in the view's header, as Obsidian's: placed before the ones already there. */
+  addAction(_icon: string, title: string, callback: (event: MouseEvent) => unknown): HTMLElement {
+    const button = document.createElement("button");
+    button.className = "clickable-icon view-action";
+    button.setAttribute("aria-label", title);
+    button.addEventListener("click", callback);
+    this.containerEl.children[0].prepend(button);
+    return button;
+  }
   registerDomEvent(target: EventTarget, type: string, callback: EventListener, options?: boolean): void { target.addEventListener(type, callback, options); }
   registerEvent(): void {}
   register(): void {}

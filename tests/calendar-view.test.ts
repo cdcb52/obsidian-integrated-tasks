@@ -119,14 +119,14 @@ it("supports period and scope keys while leaving text fields alone", () => {
   const container = new Element(), navigate = vi.fn();
   renderCalendar(container as unknown as HTMLElement, { anchor: "2026-09-20", scope: "four-day", tasks: [], dateFormat: "YYYY-MM-DD", navigate, create: vi.fn(), edit: vi.fn(), move: vi.fn(), resize: vi.fn() });
   const root = container.children[0];
-  for (const [key, anchor, scope] of [["ArrowLeft", "2026-09-16", "four-day"], ["ArrowRight", "2026-09-24", "four-day"], ["d", "2026-09-20", "four-day"], ["w", "2026-09-20", "week"], ["m", "2026-09-20", "month"]]) {
+  for (const [key, anchor, scope] of [["ArrowLeft", "2026-09-16", "four-day"], ["ArrowRight", "2026-09-24", "four-day"], ["d", "2026-09-20", "day"], ["4", "2026-09-20", "four-day"], ["w", "2026-09-20", "week"], ["m", "2026-09-20", "month"]]) {
     root.dispatchEvent(Object.assign(new Event("keydown", { cancelable: true }), { key }));
     expect(navigate).toHaveBeenLastCalledWith(anchor, scope);
   }
-  expect(navigate).toHaveBeenCalledTimes(5);
+  expect(navigate).toHaveBeenCalledTimes(6);
   Object.assign(root, { closest: () => ({}) });
   root.dispatchEvent(Object.assign(new Event("keydown"), { key: "m" }));
-  expect(navigate).toHaveBeenCalledTimes(5);
+  expect(navigate).toHaveBeenCalledTimes(6);
 });
 
 it("completes a calendar task through its checkbox without opening the editor", async () => {

@@ -52,7 +52,7 @@ export function renderCalendar(container: HTMLElement, options: CalendarOptions)
     const target = event.target as HTMLElement;
     if (target.closest?.("input, textarea, select, [contenteditable=true], [role=slider]")) return;
     const key = event.key.toLowerCase();
-    const scope = key === "d" ? "four-day" : key === "w" ? "week" : key === "m" ? "month" : undefined;
+    const scope = key === "d" ? "day" : key === "4" ? "four-day" : key === "w" ? "week" : key === "m" ? "month" : undefined;
     if (scope) { event.preventDefault(); options.navigate(options.anchor, scope); container.querySelector?.<HTMLElement>(".tm-calendar")?.focus(); }
     else if (key === "t") {
       event.preventDefault(); options.navigate(todayIso(), options.scope);
@@ -92,11 +92,14 @@ export function renderCalendar(container: HTMLElement, options: CalendarOptions)
     }
     const today = controls.createEl("button", { text: "Today" });
     today.addEventListener("click", () => options.navigate(todayIso(), options.scope));
-    const title = options.scope === "year" ? String(date.getFullYear()) : date.toLocaleDateString(undefined, { month: "long", ...(date.getFullYear() !== new Date().getFullYear() ? { year: "numeric" as const } : {}) });
+    // A day's title names the day; other periods, their month (or year).
+    const year = date.getFullYear() !== new Date().getFullYear() ? { year: "numeric" as const } : {};
+    const title = options.scope === "year" ? String(date.getFullYear())
+      : date.toLocaleDateString(undefined, options.scope === "day" ? { weekday: "long", day: "numeric", month: "long", ...year } : { month: "long", ...year });
     toolbar.createEl("h2", { text: title });
     const scopes = controls.createDiv({ cls: "tm-calendar-scopes", attr: { "aria-label": "Calendar scope" } });
-    for (const [scope, label] of [["four-day", "4D"], ["week", "W"], ["month", "M"]] as const) {
-      const button = scopes.createEl("button", { text: label, attr: { "aria-label": scope === "four-day" ? "4 days" : scope === "week" ? "Week" : "Month", "aria-pressed": String(options.scope === scope) } });
+    for (const [scope, label, name] of [["day", "D", "Day"], ["four-day", "4D", "4 days"], ["week", "W", "Week"], ["month", "M", "Month"]] as const) {
+      const button = scopes.createEl("button", { text: label, attr: { "aria-label": name, "aria-pressed": String(options.scope === scope) } });
       button.addEventListener("click", () => options.navigate(options.anchor, scope));
     }
   }
