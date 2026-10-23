@@ -8,7 +8,7 @@ Plan your work from the checklists already in your notes. Integrated Task Manage
 - **Views for every question.** Inbox, Today, Upcoming, All Tasks, Projects, Tags, and smart lists you save yourself.
 - **List, calendar or board.** Any task view can switch layout, and the Projects list switches to a Gantt chart.
 - **Projects are notes.** Tag a note `project` and its headings become sections, with dates, a deadline, a colour and progress.
-- **A sidebar that follows you.** The Task details sidebar shows today's hours, your tasks with no date, a note's tasks, the task you selected, or else what's coming up.
+- **A sidebar that follows you.** The Task details sidebar shows the task you selected, or a list that follows what you're looking at: today's calendar, your tasks with no date, a note's tasks.
 - **Live task lists in any note.** A `task-query` block turns a daily note or a dashboard into a checkable list.
 - **Fast to drive.** Select many tasks at once, use single-key shortcuts, and undo any change.
 
@@ -94,14 +94,17 @@ Each view remembers its own options and layout. To keep a setup, choose **Conver
 
 ### The Task details sidebar
 
-The Task details sidebar sits in Obsidian's right sidebar. What it shows follows what you're looking at:
+The Task details sidebar sits in Obsidian's right sidebar. It shows the task you select, or else a list you choose: click its heading to pick **Smart Context**, Inbox, Today, Upcoming, All Tasks, a smart list, a project or a tag (type to search them), and use the filter button beside it to filter, sort and group that list.
+
+**Smart Context**, the default, is All Tasks with View options that follow what you're looking at:
 
 - **Today:** today's calendar, with tasks that have no time above the hours. Drag a task onto an hour to schedule it, or click an hour to add a task there.
-- **Upcoming:** All Tasks with no date, by note. Its filter button starts with both dates set to **No date**; change them to list other tasks. Drag one onto a day to give it a date.
-- **A calendar:** that view's tasks with no date.
-- **A note:** the note's tasks. Put the cursor on a checklist line to see and edit its details.
-- **A selected task:** its title, properties, notes and subtasks, all editable in place. With several tasks selected, change a property once and every selected task follows.
-- **Nothing else:** your upcoming tasks, by date. Click one to see its details. Click the **Upcoming** heading to show Inbox, Today, All Tasks, a smart list, a project or a tag here instead (type to search them), and use the filter button beside it to filter, sort and group that list.
+- **Upcoming:** tasks with no date, by note. Its filter button starts with both dates set to **No date**; change them to list other tasks. Drag one onto a day to give it a date, or drag a task here to take its dates off.
+- **A note:** the note's tasks (the Note filter follows the note in front). Put the cursor on a checklist line to see and edit its details.
+- **A note's task view (task mode on):** all tasks, by action date.
+- **Anything else:** all tasks, by note.
+
+Smart Context keeps the filter, sort and grouping you choose for each of these. A selected task shows its title, properties, notes and subtasks, all editable in place. With several tasks selected, change a property once and every selected task follows.
 
 In the title, Enter saves what you typed and Shift+Enter moves on to the notes (a task card in the list works the same way). Press Escape to go back to the hours or the list. **Open in note**, at the bottom, opens the task's note at its line, turning task mode off when that note would otherwise open as its task view. If you close the sidebar, run **Open task details sidebar** to bring it back.
 

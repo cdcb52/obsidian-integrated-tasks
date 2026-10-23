@@ -121,54 +121,106 @@ describe("what the Task Details sidebar shows", () => {
     expect((plugin as unknown as { openProjectCreator: ReturnType<typeof vi.fn> }).openProjectCreator).toHaveBeenCalledOnce();
   });
 
-  it("follows the task view in front: today's calendar for Today, All Tasks with no date for Upcoming, else the selected task", async () => {
+  it("shows Smart Context by default, following what is in front: Today's calendar, Upcoming's tasks without a date, a note's tasks…", async () => {
     const today = todayIso();
-    const { view, sidebar, side, setActive, contents } = await setup([["A.md", [`- [ ] At nine ${today} 09:00`, `- [ ] Due today ${today}`, "- [ ] No date", "  - [ ] Its subtask", `- [ ] Only a deadline {${today}}`, "- [ ] Another undated"].join("\n")]]);
+    const tomorrow = todayIso(new Date(Date.now() + 86400000));
+    const { view, sidebar, side, setActive, files, contents } = await setup([
+      ["A.md", [`- [ ] At nine ${today} 09:00`, `- [ ] Due today ${today}`, "- [ ] No date", "  - [ ] Its subtask", `- [ ] Only a deadline {${today}}`, "- [ ] Another undated"].join("\n")],
+      ["B.md", `- [ ] Elsewhere ${tomorrow}`],
+      ["Empty.md", "Just text."]
+    ]);
+    const title = () => side().querySelector(".tm-sidebar-planner-head .tm-sidebar-planner-title")!.textContent;
+    const headings = () => Array.from(side().querySelectorAll(".tm-sidebar-planner .tm-section h2")).map(heading => heading.textContent);
+    const listed = () => Array.from(side().querySelectorAll(".tm-sidebar-planner .tm-task-item .tm-task-title")).map(item => item.textContent);
+    const badge = () => side().querySelector(".tm-sidebar-planner-head .tm-options-badge")?.textContent;
+    // Today: Today's calendar, its all-day tasks above the hours; no heading, controls, View options or tray for tasks without a date.
     await view.setState({ mode: "today" });
-    expect(side().classList.contains("is-today")).toBe(true);
+    expect(title()).toBe("Smart Context");
+    expect(side().classList.contains("is-calendar")).toBe(true);
     expect(side().querySelector(".tm-sidebar-planner .tm-calendar.is-day-scope")).not.toBeNull();
-    expect(Array.from(side().querySelectorAll(".tm-calendar-lane .tm-calendar-task-title")).map(title => title.textContent)).toEqual(["At nine"]);
-    // The day as Today's calendar shows it, its all-day tasks above the hours; no heading, controls or tray for tasks without a date.
-    expect(Array.from(side().querySelectorAll(".tm-calendar-allday .tm-calendar-task-title")).map(title => title.textContent)).toEqual(["Due today", "Only a deadline"]);
-    expect(side().querySelector("h4, .tm-calendar-toolbar, .tm-calendar-unscheduled")).toBeNull();
-    // With no task selected, the hours have the sidebar to themselves.
+    expect(Array.from(side().querySelectorAll(".tm-calendar-lane .tm-calendar-task-title")).map(item => item.textContent)).toEqual(["At nine"]);
+    expect(Array.from(side().querySelectorAll(".tm-calendar-allday .tm-calendar-task-title")).map(item => item.textContent)).toEqual(["Due today", "Only a deadline"]);
+    expect(side().querySelector("h4, .tm-calendar-toolbar, .tm-calendar-unscheduled, .tm-sidebar-planner-head .tm-filter-toggle")).toBeNull();
+    // With no task selected, the list has the sidebar to itself.
     expect(side().querySelector<HTMLElement>(".tm-sidebar-pane")!.hidden).toBe(true);
     expect(side().querySelector(".tm-sidebar-pane")!.childElementCount).toBe(0);
 
+    // Upcoming: All Tasks with No date for both dates (in its View options), by note, subtasks with their task.
     await view.setState({ mode: "upcoming" });
-    expect(side().classList.contains("is-upcoming")).toBe(true);
-    // All Tasks with No date, as a list's rows by note, subtasks with their task.
-    expect(side().querySelector(".tm-sidebar-planner-head .tm-sidebar-planner-title")!.textContent).toBe("All Tasks");
-    expect(Array.from(side().querySelectorAll(".tm-sidebar-planner .tm-section h2")).map(heading => heading.textContent)).toEqual(["A"]);
-    expect(Array.from(side().querySelectorAll(".tm-sidebar-planner .tm-task-item .tm-task-title")).map(title => title.textContent)).toEqual(["No date", "Another undated"]);
+    expect(side().classList.contains("is-calendar")).toBe(false);
+    expect(headings()).toEqual(["A"]);
+    expect(listed()).toEqual(["No date", "Another undated"]);
+    expect(badge()).toBe("2");
     expect(side().querySelector("h4, .tm-calendar, .tm-calendar-task")).toBeNull();
-    expect(side().querySelector<HTMLElement>(".tm-sidebar-pane")!.hidden).toBe(true);
+
+    // Anywhere else, All Tasks as its view lists them; beside a note's task view (task mode on), by action date.
+    await view.setState({ mode: "all" });
+    expect(headings()).toEqual(["A", "B"]);
+    expect(badge()).toBe("");
+    await view.setState({ mode: "all", pagePath: "B.md" });
+    expect(headings()).toEqual([today, tomorrow, "No date"]);
+    expect(listed()).toEqual(["Due today", "Only a deadline", "At nine", "Elsewhere", "No date", "Another undated"]);
+
+    // Beside a note (task mode off): All Tasks with its Note set to that note.
+    setActive(noteView(files.get("B.md")!, contents, { from: 1 }));
+    sidebar.render();
+    expect(title()).toBe("Smart Context");
+    expect(listed()).toEqual(["Elsewhere"]);
+    expect(badge()).toBe("1");
+    setActive(noteView(files.get("Empty.md")!, contents, { from: 0 }));
+    sidebar.render();
+    expect(side().querySelector(".tm-sidebar-planner .tm-sidebar-empty h3")!.textContent).toBe("No tasks in this note");
+    // With neither a task view nor a note in front, All Tasks.
+    setActive(undefined);
+    sidebar.render();
+    expect(headings()).toEqual(["A", "B"]);
+
+    // Upcoming with every task dated.
+    setActive(view);
+    await view.setState({ mode: "upcoming" });
     contents.set("A.md", `- [ ] Due today ${today}`);
     await (view as unknown as { plugin: { index: { refreshPath(path: string): Promise<void> } } }).plugin.index.refreshPath("A.md");
     sidebar.render();
     expect(side().querySelector(".tm-sidebar-planner .tm-sidebar-empty h3")!.textContent).toBe("Every task has a date");
-
-    await view.setState({ mode: "all" });
-    expect(side().classList.contains("is-details")).toBe(true);
-    expect(side().querySelector(".tm-sidebar-planner")).toBeNull();
-    expect(side().querySelector(".tm-sidebar-empty h3")!.textContent).toBe("No task selected");
-    // With neither a task view nor a note in front, there is nothing to show either.
-    setActive(undefined);
-    sidebar.render();
-    expect(side().querySelector(".tm-sidebar-empty p")!.textContent).toBe("Select a task in a task view, or put the cursor on a checklist in a note, to see its details here.");
   });
 
-  it("shows Upcoming's tasks where it would otherwise show nothing, and a picked one's details until Escape", async () => {
+  it("keeps Smart Context's View options for each context, the note's Note always the note in front", async () => {
+    const { view, sidebar, plugin, files, contents, side, setActive } = await setup([["A.md", "- [ ] Alpha p1\n- [ ] Bravo p2"], ["B.md", "- [ ] Charlie p2"]]);
+    Object.assign(plugin, { saveViewOptions: (key: string, options: unknown) => {
+      if (options) plugin.settings.viewOptions = { ...plugin.settings.viewOptions, [key]: options as never };
+      else { const { [key]: _, ...rest } = plugin.settings.viewOptions; void _; plugin.settings.viewOptions = rest; }
+    } });
+    const listed = () => Array.from(side().querySelectorAll(".tm-sidebar-planner .tm-task-item .tm-task-title")).map(item => item.textContent);
+    setActive(noteView(files.get("A.md")!, contents, { from: 5 }));
+    sidebar.render();
+    expect(listed()).toEqual(["Alpha", "Bravo"]);
+    // Sorted by title, descending: kept for notes, without the note itself.
+    side().querySelector<HTMLButtonElement>(".tm-sidebar-planner-head .tm-filter-toggle")!.click();
+    side().querySelector<HTMLButtonElement>(".tm-sidebar-planner-head [data-tm-focus-key='option-direction']")!.click();
+    expect(plugin.settings.viewOptions["sidebar:context:note"]).toMatchObject({ filters: [], descending: true });
+    expect(listed()).toEqual(["Bravo", "Alpha"]);
+    // Another note: its own tasks, in the same order.
+    setActive(noteView(files.get("B.md")!, contents, { from: 5 }));
+    sidebar.render();
+    expect(listed()).toEqual(["Charlie"]);
+    // Upcoming keeps its own.
+    setActive(view);
+    await view.setState({ mode: "upcoming" });
+    expect(listed()).toEqual(["Alpha", "Bravo", "Charlie"]);
+  });
+
+  it("shows the chosen list where no task is shown, and a picked one's details until Escape", async () => {
     const tomorrow = todayIso(new Date(Date.now() + 86400000));
     const later = todayIso(new Date(Date.now() + 3 * 86400000));
-    const { view, sidebar, side, setActive, files, contents } = await setup([
+    const { view, sidebar, plugin, side, setActive, files, contents } = await setup([
       ["A.md", `- [ ] Undated\n- [ ] Later on ${later}\n- [ ] Tomorrow's ${tomorrow}\n  - [ ] Its subtask ${tomorrow}\n- [x] Done already ${tomorrow}`],
       ["Empty.md", "Just text."]
     ]);
-    const upcoming = () => Array.from(side().querySelectorAll<HTMLElement>(".tm-sidebar-idle .tm-section")).map(section =>
+    plugin.settings.sidebarIdleView = "upcoming";
+    const upcoming = () => side().querySelector<HTMLElement>(".tm-sidebar-planner")!.hidden ? [] : Array.from(side().querySelectorAll<HTMLElement>(".tm-sidebar-idle .tm-section")).map(section =>
       [section.querySelector("h2")!.textContent, Array.from(section.querySelectorAll(".tm-task-title")).map(title => title.textContent)]);
-    // A task view with nothing selected: by date, open tasks only, subtasks with their task.
-    await view.setState({ mode: "all" });
+    // Whatever view is in front: by date, open tasks only, subtasks with their task.
+    await view.setState({ mode: "today" });
     expect(side().querySelector(".tm-sidebar-planner-title")!.textContent).toBe("Upcoming");
     expect(upcoming()).toEqual([[tomorrow, ["Tomorrow's"]], [later, ["Later on"]]]);
     // A note without tasks of its own, and neither a view nor a note in front.
@@ -211,16 +263,19 @@ describe("what the Task Details sidebar shows", () => {
     plugin.settings.smartLists = [{ id: "urgent", name: "Urgent", filters: [{ property: "priority", operator: "is", values: ["1"] }], sort: "title", descending: false, grouping: "default" }];
     await view.setState({ mode: "all" });
     const title = () => side().querySelector<HTMLButtonElement>(".tm-sidebar-idle-title")!;
-    const sections = () => Array.from(side().querySelectorAll(".tm-sidebar-idle-list > .tm-section")).map(section =>
+    const sections = () => Array.from(side().querySelectorAll(".tm-sidebar-planner > .tm-section")).map(section =>
       [section.querySelector("h2")!.textContent, Array.from(section.querySelectorAll(".tm-task-title")).map(item => item.textContent)]);
-    const listed = () => Array.from(side().querySelectorAll(".tm-sidebar-idle-list .tm-task-title")).map(item => item.textContent);
+    const listed = () => Array.from(side().querySelectorAll(".tm-sidebar-planner .tm-task-title")).map(item => item.textContent);
     const pick = (label: string) => {
       title().click();
       const options = Array.from(document.querySelectorAll<HTMLElement>(".tm-choice-popover [role=option]"));
       options.find(option => option.textContent === label)!.click();
     };
+    expect(title().textContent).toBe("Smart Context");
+    pick("Upcoming");
     expect(title().textContent).toBe("Upcoming");
     expect(sections()).toEqual([[tomorrow, ["Next"]]]);
+    saveSettings.mockClear();
     // Today: overdue first, then today, as the view groups them; the choice is kept in the settings.
     pick("Today");
     expect(plugin.settings.sidebarIdleView).toBe("today");
@@ -231,20 +286,20 @@ describe("what the Task Details sidebar shows", () => {
     expect(listed()).toEqual(["Triage", "Sort mail"]);
     // A smart list, in its own sort.
     title().click();
-    expect(Array.from(document.querySelectorAll(".tm-choice-popover [role=option]")).map(option => option.textContent)).toEqual(["Inbox", "Today", "Upcoming", "All Tasks", "Urgent", "Site", "errand"]);
+    expect(Array.from(document.querySelectorAll(".tm-choice-popover [role=option]")).map(option => option.textContent)).toEqual(["Smart Context", "Inbox", "Today", "Upcoming", "All Tasks", "Urgent", "Site", "errand"]);
     expect(document.querySelector(".tm-choice-popover [aria-selected=true]")!.textContent).toBe("Inbox");
     document.querySelector<HTMLElement>(".tm-choice-popover [data-value='smartList:urgent']")!.click();
     expect(listed()).toEqual(["Next", "Triage"]);
 
     // View options of its own, for the list it shows: they stay open as its tasks redraw.
-    const toggle = side().querySelector<HTMLButtonElement>(".tm-sidebar-idle .tm-filter-toggle")!;
+    const toggle = side().querySelector<HTMLButtonElement>(".tm-sidebar-planner-head .tm-filter-toggle")!;
     toggle.click();
-    const panel = side().querySelector<HTMLElement>(".tm-sidebar-idle .tm-options-panel")!;
+    const panel = side().querySelector<HTMLElement>(".tm-sidebar-planner-head .tm-options-panel")!;
     expect(panel.hidden).toBe(false);
-    side().querySelector<HTMLButtonElement>(".tm-sidebar-idle [data-tm-focus-key='option-direction']")!.click();
+    side().querySelector<HTMLButtonElement>(".tm-sidebar-planner-head [data-tm-focus-key='option-direction']")!.click();
     expect(plugin.settings.viewOptions["sidebar:smartList:urgent"]).toMatchObject({ sort: "title", descending: true });
     expect(listed()).toEqual(["Triage", "Next"]);
-    expect(side().querySelector(".tm-sidebar-idle .tm-options-panel")).toBe(panel);
+    expect(side().querySelector(".tm-sidebar-planner-head .tm-options-panel")).toBe(panel);
     expect(panel.hidden).toBe(false);
     // Another list keeps its own.
     pick("Upcoming");
@@ -277,9 +332,9 @@ describe("what the Task Details sidebar shows", () => {
     const option = (value: string) => popover.querySelector<HTMLElement>(`[data-value='${value}']`)!;
     const icon = (value: string) => setIcon.mock.calls.find(([element]) => option(value).contains(element as Node))?.[1];
     // Today's icon follows the style: a filled star in Things.
-    expect(["inbox", "today", "upcoming", "all", "smartList:urgent", "tag:errand"].map(icon)).toEqual(["inbox", "star", "calendar-days", "layers", "list-filter", "hash"]);
-    expect(["inbox", "today", "upcoming", "all", "smartList:urgent", "tag:errand"].map(value => option(value).className))
-      .toEqual(["blue", "yellow is-filled", "red", "cyan", "orange", "muted"].map(color => `tm-options-option tm-choice-color-${color}`));
+    expect(["context", "inbox", "today", "upcoming", "all", "smartList:urgent", "tag:errand"].map(icon)).toEqual(["sparkles", "inbox", "star", "calendar-days", "layers", "list-filter", "hash"]);
+    expect(["context", "inbox", "today", "upcoming", "all", "smartList:urgent", "tag:errand"].map(value => option(value).className))
+      .toEqual(["blue", "blue", "yellow is-filled", "red", "cyan", "orange", "muted"].map(color => `tm-options-option tm-choice-color-${color}`));
     // A project shows its progress where a list shows an icon.
     expect(option("project:Projects/Site.md").querySelector(".tm-choice-icon .tm-project-progress")!.getAttribute("aria-valuenow")).toBe("50");
     // The search on top narrows them.
@@ -289,7 +344,7 @@ describe("what the Task Details sidebar shows", () => {
     input.value = "s";
     input.dispatchEvent(new Event("input"));
     const shown = () => Array.from(popover.querySelectorAll<HTMLElement>("[role=option]")).filter(item => !item.hidden).map(item => item.textContent);
-    expect(shown()).toEqual(["All Tasks", "Shop", "Site"]);
+    expect(shown()).toEqual(["Smart Context", "All Tasks", "Shop", "Site"]);
     input.value = "sho";
     input.dispatchEvent(new Event("input"));
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -304,7 +359,7 @@ describe("what the Task Details sidebar shows", () => {
     expect(option("today").classList.contains("is-filled")).toBe(false);
   });
 
-  it("gives Upcoming's All Tasks View options of their own, its dates set to No date until changed", async () => {
+  it("gives Smart Context beside Upcoming View options of its own, its dates set to No date until changed", async () => {
     const { view, sidebar, plugin, side } = await setup([["A.md", ["- [ ] Bravo p2", "- [ ] Alpha p1", "- [ ] Charlie p2", "- [ ] Delta", `- [ ] Echo p2 ${todayIso()}`].join("\n")]]);
     const saved: Record<string, unknown> = {};
     Object.assign(plugin, { saveViewOptions: (key: string, options: unknown) => {
@@ -315,7 +370,7 @@ describe("what the Task Details sidebar shows", () => {
     await view.setState({ mode: "upcoming" });
     const titles = () => Array.from(side().querySelectorAll(".tm-sidebar-planner .tm-task-item .tm-task-title")).map(title => title.textContent);
     const toggle = side().querySelector<HTMLButtonElement>(".tm-sidebar-planner-head .tm-filter-toggle")!;
-    expect(side().querySelector(".tm-sidebar-planner-head .tm-sidebar-planner-title")!.textContent).toBe("All Tasks");
+    expect(side().querySelector(".tm-sidebar-planner-head .tm-sidebar-planner-title")!.textContent).toBe("Smart Context");
     const viewOrder = titles();
     expect(viewOrder).toHaveLength(4);
     // Its dates' No date shows in its View options, as filters to change.
@@ -323,59 +378,36 @@ describe("what the Task Details sidebar shows", () => {
     toggle.click();
     expect(side().querySelector<HTMLElement>(".tm-sidebar-planner-head .tm-options-panel")!.hidden).toBe(false);
     // Its own options, kept with the views': P2 only (any date, so the dated one too), by title, grouped by priority.
-    plugin.settings.viewOptions = { ...plugin.settings.viewOptions, "sidebar:all-tasks": { filters: [{ property: "priority", operator: "is", values: ["2"] }], sort: "title", descending: false, grouping: "priority" } };
+    plugin.settings.viewOptions = { ...plugin.settings.viewOptions, "sidebar:context:upcoming": { filters: [{ property: "priority", operator: "is", values: ["2"] }], sort: "title", descending: false, grouping: "priority" } };
     sidebar.render(true);
     expect(titles()).toEqual(["Bravo", "Charlie", "Echo"]);
     expect(Array.from(side().querySelectorAll(".tm-sidebar-planner .tm-section h2")).map(heading => heading.textContent)).toEqual(["P2"]);
     expect(toggle.querySelector(".tm-options-badge")!.textContent).toBe("1");
     // Clear all goes back to No date, in the view's order.
     side().querySelector<HTMLButtonElement>(".tm-options-clear")!.click();
-    expect(saved["sidebar:all-tasks"]).toBeUndefined();
+    expect(saved["sidebar:context:upcoming"]).toBeUndefined();
     expect(titles()).toEqual(viewOrder);
   });
 
-  it("lists the tasks without a date beside any view's calendar, as for Upcoming, under the plugin's icon", async () => {
+  it("lists All Tasks beside another view's calendar, and Today's calendar is today's hours alone", async () => {
     const today = todayIso();
     const { view, sidebar, main, side } = await setup([["A.md", [`- [ ] At nine ${today} 09:00`, "- [ ] No date"].join("\n")]]);
     expect(sidebar.getIcon()).toBe("circle-check-big");
-    const layout = (name: string) => main().querySelector<HTMLButtonElement>(`[data-tm-focus-key="layout-${name}"]`)!.click();
-    await view.setState({ mode: "all" });
-    expect(side().classList.contains("is-details")).toBe(true);
-    layout("calendar");
-    expect(side().classList.contains("is-upcoming")).toBe(true);
-    expect(Array.from(side().querySelectorAll(".tm-sidebar-planner .tm-task-item .tm-task-title")).map(title => title.textContent)).toEqual(["No date"]);
-    expect(side().querySelector(".tm-sidebar-planner-title")!.textContent).toBe("No date");
-    // Today's calendar too, rather than its hours again: All Tasks with no date, as beside Upcoming.
+    const listed = () => Array.from(side().querySelectorAll(".tm-sidebar-planner .tm-task-item .tm-task-title")).map(title => title.textContent);
+    await view.setState({ mode: "all", layout: "calendar" });
+    expect(listed()).toEqual(["At nine", "No date"]);
+    // Today's calendar, whatever scope was kept: no date, buttons or scopes above the hours; beside it, Today's calendar too.
     await view.setState({ mode: "today", layout: "calendar", calendarScope: "month" });
-    expect(side().classList.contains("is-upcoming")).toBe(true);
-    expect(side().querySelector(".tm-sidebar-planner-title")!.textContent).toBe("All Tasks");
-    // Today's calendar is today's hours alone, whatever scope was kept: no date, buttons or scopes above them.
     expect(main().querySelector(".tm-calendar.is-day-scope")).not.toBeNull();
     expect(main().querySelector(".tm-calendar-toolbar")).toBeNull();
     expect(Array.from(main().querySelectorAll(".tm-calendar-lane .tm-calendar-task-title")).map(title => title.textContent)).toEqual(["At nine"]);
-    layout("list");
-    expect(side().classList.contains("is-today")).toBe(true);
+    expect(side().classList.contains("is-calendar")).toBe(true);
   });
 
-  it("lists the view's own tasks without a date beside its calendar: a project's or a smart list's, through its filters but those on dates", async () => {
-    const today = todayIso();
-    const { view, plugin, side } = await setup([["A.md", "- [ ] Elsewhere p2"], ["Site.md", [`- [ ] Launch ${today}`, "- [ ] Write copy p1", "- [ ] Pick fonts"].join("\n")]]);
-    const listed = () => Array.from(side().querySelectorAll(".tm-sidebar-planner .tm-task-item .tm-task-title")).map(title => title.textContent);
-    await view.setState({ mode: "all", layout: "calendar" });
-    expect(listed()).toEqual(["Write copy", "Elsewhere", "Pick fonts"]);
-    // The project's view shows its P1 tasks with a date; beside it, its P1 tasks without one.
-    plugin.settings.viewOptions = { "project:Site.md": { filters: [{ property: "priority", operator: "is", values: ["1"] }, { property: "scheduledDate", operator: "has", values: [] }], sort: "date", descending: false, grouping: "default" } };
-    await view.setState({ mode: "all", pagePath: "Site.md", layout: "calendar" });
-    expect(listed()).toEqual(["Write copy"]);
-    plugin.settings.smartLists = [{ id: "p2", name: "P2", filters: [{ property: "priority", operator: "is", values: ["2"] }], sort: "date", descending: false, grouping: "default" }];
-    await view.setState({ mode: "smartLists", smartListId: "p2", layout: "calendar" });
-    expect(listed()).toEqual(["Elsewhere"]);
-  });
-
-  it("takes the dates off a card dragged from the view's calendar into the tasks without a date", async () => {
+  it("takes the dates off a card dragged from Upcoming's calendar into the tasks without a date", async () => {
     const today = todayIso();
     const { view, main, side, store } = await setup([["A.md", [`- [ ] At nine ${today} 09:00`, "- [ ] No date"].join("\n")]]);
-    await view.setState({ mode: "all", layout: "calendar", calendarScope: "day", calendarAnchor: today });
+    await view.setState({ mode: "upcoming", layout: "calendar", calendarScope: "day", calendarAnchor: today });
     const transfer = { types: [TASK_DRAG_TYPE], dropEffect: "", effectAllowed: "", setData: () => {} };
     const drag = (target: EventTarget, type: string) => target.dispatchEvent(Object.assign(new Event(type, { bubbles: true, cancelable: true }), { dataTransfer: transfer, clientY: 0 }));
     drag(main().querySelector<HTMLElement>(".tm-calendar-lane .tm-calendar-task")!, "dragstart");
@@ -521,7 +553,7 @@ describe("editing in the Task Details sidebar", () => {
     key(title(), { key: "Escape" });
     await settle();
     // Escape closes the task, saving nothing; opened again, it reads as it did.
-    expect(side().querySelector(".tm-sidebar-empty h3")!.textContent).toBe("No task selected");
+    expect(side().querySelector<HTMLElement>(".tm-sidebar-planner")!.hidden).toBe(false);
     expect(store.update).not.toHaveBeenCalled();
     rows(main())[0].click();
     expect(title().value).toBe("Draft the brief");
@@ -737,7 +769,7 @@ describe("three panes (Task details › Three panes: in the sidebar)", () => {
     key("Escape");
     await settle();
     expect(store.create).not.toHaveBeenCalled();
-    expect(side().querySelector(".tm-sidebar-empty h3")!.textContent).toBe("No task selected");
+    expect(side().querySelector<HTMLElement>(".tm-sidebar-planner")!.hidden).toBe(false);
 
     // What is set before it is written goes with it; Enter writes it, and the next new task takes its place.
     view.newTask();
@@ -849,14 +881,14 @@ describe("dragging between the Task Details sidebar and the view", () => {
 });
 
 describe("beside a note (no task view in front)", () => {
-  it("lists the note's tasks, nested, and shows the task (or tasks) the caret is on until Escape", async () => {
+  it("lists the note's tasks (Smart Context), and shows the task (or tasks) the caret is on until Escape", async () => {
     const { sidebar, side, setActive, files, contents } = await setup([["A.md", ["# Plan", "- [ ] First p2", "  - [ ] Its subtask", "Prose", "- [ ] Second"].join("\n")]]);
     const caret = { from: 3 } as { from: number; to?: number };
     setActive(noteView(files.get("A.md")!, contents, caret));
     sidebar.render();
-    expect(side().classList.contains("is-note")).toBe(true);
     const listed = () => Array.from(side().querySelectorAll<HTMLElement>(".tm-sidebar-planner .tm-task-item"));
-    expect(listed().map(row => [row.querySelector(".tm-task-title")!.textContent, row.style.getPropertyValue("--tm-depth")])).toEqual([["First", "0"], ["Its subtask", "1"], ["Second", "0"]]);
+    // Subtasks go with their task.
+    expect(listed().map(row => row.querySelector(".tm-task-title")!.textContent)).toEqual(["First", "Second"]);
     expect(side().querySelector<HTMLElement>(".tm-sidebar-pane")!.hidden).toBe(true);
 
     // The caret on a checklist: that task's details, with the list out of the way.
@@ -1006,7 +1038,7 @@ describe("a project created in the Task Details sidebar (three panes)", () => {
 
     side().dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
     expect(side().querySelector(".is-new-project")).toBeNull();
-    expect(side().querySelector(".tm-sidebar-empty h3")!.textContent).toBe("No task selected");
+    expect(side().querySelector<HTMLElement>(".tm-sidebar-planner")!.hidden).toBe(false);
 
     await sidebar.startNewProject();
     rows(main())[0].click();

@@ -2558,20 +2558,19 @@ button.tm-things-card-project:hover, button.tm-things-card-project:focus-visible
 .tm-sidebar-pane { display: flex; flex-direction: column; gap: var(--size-4-3); }
 /* Its toolbar, as the task navigation's, at the top above whatever it shows. */
 .tm-task-sidebar .tm-sidebar-toolbar { flex: 0 0 auto; margin: calc(-1 * var(--size-4-3)) calc(-1 * var(--size-4-3)) var(--size-4-2); }
-/* With Today or Upcoming open, their tasks fill the sidebar, or with a task shown (and no drag of tasks under way), its
+/* Its list (or today's calendar) fills the sidebar, or with a task shown (and no drag of tasks under way), the task's
    details do: one at a time. */
-.workspace-leaf-content[data-type="task-manager-sidebar"] .view-content.tm-task-sidebar:is(.is-today, .is-upcoming) { overflow: hidden; padding-bottom: var(--size-4-3); }
-.tm-task-sidebar:is(.is-today, .is-upcoming) .tm-sidebar-planner { display: flex; flex: 1 1 0; flex-direction: column; min-height: 160px; overflow-y: auto; }
-.tm-task-sidebar:is(.is-today, .is-upcoming) .tm-sidebar-pane { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.workspace-leaf-content[data-type="task-manager-sidebar"] .view-content.tm-task-sidebar { overflow: hidden; padding-bottom: var(--size-4-3); }
+.tm-task-sidebar .tm-sidebar-planner { display: flex; flex: 1 1 0; flex-direction: column; min-height: 160px; overflow-y: auto; }
+.tm-task-sidebar .tm-sidebar-pane { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .tm-task-sidebar .tm-sidebar-planner[hidden], .tm-sidebar-pane[hidden] { display: none; }
-/* Above the tasks without a date: their name, and their View options, whose panel fills the sidebar's width below. */
+/* Above the list: its name, and its View options, whose panel fills the sidebar's width below. */
 .tm-sidebar-planner-head { position: relative; display: flex; flex: none; align-items: center; justify-content: space-between; gap: var(--size-4-2); padding: 0 0 var(--size-4-2) 6px; }
 .tm-sidebar-planner-head[hidden] { display: none; }
 .tm-sidebar-planner-title { color: var(--text-muted); font-size: var(--font-ui-small); font-weight: var(--font-semibold); }
 .tm-sidebar-planner-head .tm-options-panel { left: 0; right: 0; width: auto; max-width: none; }
 .tm-task-sidebar .tm-sidebar-planner .tm-section { margin-bottom: var(--size-4-4); }
-/* With nothing else to show: a view's tasks under its name, a button that picks the view, beside their View options. */
-.tm-task-sidebar .tm-sidebar-idle { display: flex; flex-direction: column; }
+/* The list's name is a button that picks what it shows. */
 button.tm-sidebar-planner-title.tm-sidebar-idle-title {
   display: inline-flex; align-items: center; gap: 4px; height: auto; margin-left: -6px; padding: 2px 6px;
   border: 0; border-radius: var(--radius-s); box-shadow: none; background: transparent; cursor: pointer;
@@ -2580,14 +2579,14 @@ button.tm-sidebar-idle-title:hover, button.tm-sidebar-idle-title:focus-visible {
 .tm-sidebar-idle-chevron { display: inline-flex; }
 .tm-sidebar-idle-chevron svg { width: 12px; height: 12px; color: var(--text-faint); }
 .tm-task-sidebar .tm-sidebar-idle .tm-section { margin-bottom: var(--size-4-4); }
-.tm-task-sidebar.is-today .tm-sidebar-planner { overflow: hidden; }
+.tm-task-sidebar.is-calendar .tm-sidebar-planner { overflow: hidden; }
 
 /* Today's hours fill their part, and scroll. */
 .tm-sidebar-calendar, .tm-sidebar-calendar .tm-calendar { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
 /* Today's all-day tasks above its hours, scrolling on their own when there are many. */
 .tm-sidebar-calendar .tm-calendar-allday { flex-shrink: 0; max-height: 30%; overflow-y: auto; }
 .tm-task-sidebar .tm-calendar-day-scroll { flex: 1; min-height: 0; max-height: none; border-radius: var(--radius-m); }
-/* Upcoming's tasks with no date are a list's rows, narrower: their properties go below the title. */
+/* The list's rows are narrower than a view's: their properties go below the title. */
 .tm-task-sidebar :is(.tm-sidebar-planner, .tm-sidebar-idle) .tm-task-list { margin: 0; }
 .tm-task-sidebar :is(.tm-sidebar-planner, .tm-sidebar-idle) .tm-task-content { grid-template-columns: minmax(0, 1fr); }
 

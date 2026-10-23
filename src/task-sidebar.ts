@@ -33,9 +33,6 @@ import type { Project, SavedViewOptions, Task, TaskEditorPreset, TaskFilter, Tas
 
 export const TASK_SIDEBAR_VIEW = "task-manager-sidebar";
 
-/** What the sidebar shows for the task view in front: Today's calendar, Upcoming's All Tasks without a date, or the
- * selected task; or for a note in front, its tasks. */
-type SidebarMode = "today" | "upcoming" | "details" | "note";
 /** What the details edit through: the task view in front, or beside a note, the note's (see NoteTaskHost). */
 /** A task's line and title, as last seen. */
 type TaskSource = { raw: string; title: string };
@@ -62,57 +59,47 @@ const NEW_PROJECT_ID = "new-project";
 /** One part of the sidebar, redrawn only when what it shows changes, so typing in one is not disturbed by the other. */
 interface Section { element: HTMLElement; drawn?: string }
 
-/** Upcoming's tasks without a date show in pages, so a large vault does not build every row at once. */
+/** A list's tasks show in pages, so a large vault does not build every row at once. */
 const LIST_PAGE = 100;
 
-/** The tasks without a date's own View options, kept with the views' options. */
-const UNDATED_OPTIONS = "sidebar:undated";
-/** Beside Upcoming (or Today's calendar): All Tasks' own View options, its dates set to No date until changed. */
-const ALL_TASKS_OPTIONS = "sidebar:all-tasks";
 /**
- * What the sidebar lists when it has nothing else to show (see TaskManagerSettings.sidebarIdleView): a view's tasks or a
- * smart list's, grouped by default as the view groups them ("today": overdue, then today).
+ * What the sidebar lists while no task is shown (see TaskManagerSettings.sidebarIdleView): a view's tasks or a smart
+ * list's, grouped by default as the view groups them ("today": overdue, then today). `filters`: its View options' own
+ * until changed there; `pinned` ones stay whatever they say (Smart Context's note). `calendar` shows today's calendar
+ * instead, `undated` takes the dates off tasks dropped on it, and `empty` is its icon and heading while it has no tasks.
  */
-interface IdleView { key: string; label: string; query: TaskQuery; sort: TaskSort; descending: boolean; group: Exclude<TaskGrouping, "default"> | "today" }
-const IDLE_VIEWS = [["inbox", "Inbox"], ["today", "Today"], ["upcoming", "Upcoming"], ["all", "All Tasks"]] as const;
-/**
- * The list beside a calendar or Upcoming, as it shows: its name, where its View options are kept, its tasks through those
- * options' filters (`filters`, as the options show them; `filtered` once they differ from the list's own), in their sort
- * and grouping (`group` for View default).
- */
-interface UndatedList {
-  key: string; label: string; query: TaskQuery; filters: TaskFilter[]; filtered: boolean; sort: TaskSort; descending: boolean; grouping: TaskGrouping;
-  group: Exclude<TaskGrouping, "default">;
+interface IdleView {
+  key: string; label: string; query: TaskQuery; sort: TaskSort; descending: boolean; group: Exclude<TaskGrouping, "default"> | "today";
+  filters?: readonly TaskFilter[]; pinned?: readonly TaskFilter[]; calendar?: boolean; undated?: boolean; empty?: readonly [string, string];
 }
+const IDLE_VIEWS = [["inbox", "Inbox"], ["today", "Today"], ["upcoming", "Upcoming"], ["all", "All Tasks"]] as const;
+/** Smart Context (see TaskSidebarView.contextView): All Tasks, its View options set for the view or note in front. */
+export const SMART_CONTEXT = "context";
+const sameFilter = (a: TaskFilter, b: TaskFilter): boolean =>
+  a.property === b.property && a.operator === b.operator && JSON.stringify(a.values) === JSON.stringify(b.values);
 
 /**
- * The Task Details sidebar (in the right sidebar by default). Its content follows the task view in front: with Today open, the
- * day's calendar; with Upcoming open, All Tasks without a date (beside a calendar, the view's own); and below them when a task is selected (or, anywhere else,
- * filling it) the selected task's details, editable in place. Only the tasks show: no headings or calendar controls. Tasks drag between it and
- * the view: onto an hour to schedule them then, from the tasks without a date onto a day.
+ * The Task Details sidebar (in the right sidebar by default). While no task is shown it lists what its name picks (see
+ * idleView): Smart Context by default, which follows the view or note in front (Today's calendar beside Today, All Tasks
+ * without a date beside Upcoming…). A task selected there or in the view takes its place with its details, editable in
+ * place. Tasks drag between it and the view: onto an hour to schedule them then, from the tasks without a date onto a day.
  */
 export class TaskSidebarView extends ItemView {
-  private mode?: SidebarMode;
+  /** The list shown (and the note Smart Context follows), to start afresh when it changes. */
+  private context?: string;
   /** The shown task's title and notes as typed (and a subtask being typed); `dirty` until they are saved. */
   /** `source`: the task's line and title when the draft began (or was last saved), to find it by if its line moves. */
   private draft?: { id: string; dirty: boolean; source?: TaskSource } & TaskCardDraft;
   /** Saves and writes, one after another, so each sees the task as the last one left it. */
   private saving: Promise<void> = Promise.resolve();
-  /** The layout drawn (mode, style, density) and its parts: the day or the list on top, then the details. */
+  /** The layout drawn (list, style, density) and its parts: the list (or today's calendar), then the details in its place. */
   private skeleton = "";
   private planner?: Section;
   private details?: Section;
-  /** Above the tasks without a date: their name and View options. */
+  /** Above the list, staying put as it redraws: its name (a button that picks it) and its View options. */
   private plannerHead?: HTMLElement;
-  private plannerTitle?: HTMLElement;
-  private undatedPanel?: ViewOptionsPanel;
-  private undatedOptionsOpen = false;
-  /** With nothing else to show: the list's tasks (redrawn as they change, under a head that stays put), and its View options. */
-  private idleList?: Section;
   private idlePanel?: ViewOptionsPanel;
   private idleOptionsOpen = false;
-  /** What the idle list says while it has no tasks: what the sidebar is for, where it was drawn. */
-  private idleEmpty = { title: "", text: "" };
   /**
    * A task selected here (in the day or the list), or shown here by the view (one it does not list), shown in the
    * details until the view's selection changes.
@@ -148,8 +135,8 @@ export class TaskSidebarView extends ItemView {
 
   async onOpen(): Promise<void> {
     this.unsubscribe = this.plugin.index.subscribe(() => { this.indexVersion++; this.scheduleRender(); });
-    // A drag shows Today's hours (or the tasks without a date) at once, to drop on; they give way to the task shown
-    // again once it ends, after the drop has read them.
+    // A drag shows the list (or today's hours) at once, to drop on; it gives way to the task shown again once it ends,
+    // after the drop has read it.
     this.stopDragWatch = onTaskDrag(drag => {
       this.dragging = Boolean(drag);
       if (drag) this.render(); else this.scheduleRender();
@@ -162,8 +149,8 @@ export class TaskSidebarView extends ItemView {
       event.preventDefault();
       this.closeDetails();
     });
-    // A click outside the tasks without a date's View options (or the idle list's) closes them.
-    this.registerDomEvent(this.content.ownerDocument, "pointerdown", event => { this.undatedPanel?.handleOutside(event); this.idlePanel?.handleOutside(event); });
+    // A click outside the list's View options closes them.
+    this.registerDomEvent(this.content.ownerDocument, "pointerdown", event => this.idlePanel?.handleOutside(event));
     this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.scheduleRender()));
     this.registerEvent(this.app.workspace.on("layout-change", () => this.scheduleRender()));
     this.render();
@@ -213,13 +200,9 @@ export class TaskSidebarView extends ItemView {
   /** `force`: redraw both parts, even unchanged. */
   render(force = false): void {
     const view = this.taskView();
-    // A task picked from Upcoming's list with nothing else in front is edited as beside a note.
+    // A task picked from the list with nothing else in front is edited as beside a note.
     const host = this.host() ?? (this.localId ? this.note : undefined);
-    const state = view?.getState();
-    const notePath = !view ? this.note.noteView()?.file?.path : undefined;
-    // A calendar, like Upcoming, has the tasks without a date beside it, to drag onto a day. A note has its tasks.
-    const mode: SidebarMode = !view ? notePath ? "note" : "details" : view.hasCalendar ? "upcoming"
-      : !view.pagePath && (state?.mode === "today" || state?.mode === "upcoming") ? state.mode : "details";
+    const idle = this.idleView();
     const selected = host?.sidebarSelection() ?? [];
     // A task selected in the view takes over from one selected here.
     const viewSelection = selected.map(task => task.id).join("\n");
@@ -228,7 +211,10 @@ export class TaskSidebarView extends ItemView {
       // As it does from a project being created.
       if (selected.length) { this.localId = undefined; this.newProject = undefined; }
     }
-    if (mode !== this.mode) { this.localId = undefined; this.listRows = LIST_PAGE; }
+    // Another list (or Smart Context's for another note) starts afresh.
+    const context = JSON.stringify([idle.key, idle.pinned]);
+    if (context !== this.context) { this.localId = undefined; this.listRows = LIST_PAGE; }
+    this.context = context;
     const local = this.localId ? this.plugin.index.taskById(this.localId) : undefined;
     if (!local) this.localId = undefined;
     // A project being created comes first, then a new task the view started here (three panes), until each is written or dropped.
@@ -237,50 +223,32 @@ export class TaskSidebarView extends ItemView {
     const task = creating ? undefined : entry?.task ?? local ?? (selected.length === 1 ? selected[0] : undefined);
     this.followTask(task, entry);
     const settings = this.plugin.settings;
-    const skeleton = [mode, settings.style, settings.density].join("|");
-    if (skeleton !== this.skeleton || !this.details?.element.isConnected) this.build(mode, skeleton);
-    this.mode = mode;
-    const planner = this.planner;
-    // With nothing else to show, a view's tasks show instead: Upcoming's unless another is chosen.
-    const idle = this.idleView();
-    if (planner && mode === "note") {
-      this.draw(planner, JSON.stringify([notePath, this.indexVersion, this.listRows, settings.calendarProjectColors, idle.key, idle.label]), force, () => this.renderNoteTasks(planner.element, notePath!));
-      for (const element of Array.from(planner.element.querySelectorAll<HTMLElement>("[data-task-id]"))) element.toggleClass("is-selected", element.getAttribute("data-task-id") === this.localId);
-    } else if (planner && view && mode !== "details") {
-      // The tasks without a date are the view's own: a project's, a tag's, a smart list's…
-      const undated = mode === "upcoming" ? this.undatedList(view) : undefined;
-      if (undated && this.plannerTitle) this.plannerTitle.textContent = undated.label;
-      this.draw(planner, JSON.stringify([todayIso(), this.indexVersion, this.listRows, undated, settings.calendarProjectColors, settings.calendarPriorityColors]), force,
-        () => undated ? this.renderUndated(planner.element, undated) : this.renderToday(planner.element));
-      for (const element of Array.from(planner.element.querySelectorAll<HTMLElement>("[data-task-id]"))) element.toggleClass("is-selected", element.getAttribute("data-task-id") === this.localId);
-    }
+    const skeleton = [idle.key, settings.style, settings.density].join("|");
+    if (skeleton !== this.skeleton || !this.details?.element.isConnected) this.build(idle, skeleton);
+    const planner = this.planner!;
+    this.draw(planner, JSON.stringify([todayIso(), this.indexVersion, this.listRows, idle, this.idleOptions(idle), settings.calendarProjectColors, settings.calendarPriorityColors]), force,
+      () => idle.calendar ? this.renderToday(planner.element) : this.renderIdleList(planner.element, idle));
+    for (const element of Array.from(planner.element.querySelectorAll<HTMLElement>("[data-task-id]"))) element.toggleClass("is-selected", element.getAttribute("data-task-id") === this.localId);
     const details = this.details!;
-    // One at a time: a task shown (or several selected) has the sidebar to itself; without one (or after Escape), it
-    // shows Today's hours or the tasks without a date, as a drag of tasks also brings them back meanwhile, to drop on.
+    // One at a time: a task shown (or several selected) has the sidebar to itself; without one (or after Escape), the
+    // list shows, as a drag of tasks also brings it back meanwhile, to drop on.
     const several = !creating && !task && selected.length > 1;
     this.shownId = creating ? NEW_PROJECT_ID : task?.id ?? (several ? "selection" : undefined);
-    const alone = Boolean(this.shownId) && !(this.dragging && planner);
+    const alone = Boolean(this.shownId) && !this.dragging;
     this.content.toggleClass("is-showing-task", alone);
-    if (planner) planner.element.hidden = alone;
+    planner.element.hidden = alone;
     if (this.plannerHead) this.plannerHead.hidden = alone;
-    if (alone && this.undatedPanel?.isOpen) this.undatedPanel.setOpen(false);
-    else this.undatedPanel?.sync();
     if (alone && this.idlePanel?.isOpen) this.idlePanel.setOpen(false);
-    const shown = mode === "details" || alone;
-    details.element.hidden = !shown;
+    else this.idlePanel?.sync();
+    details.element.hidden = !alone;
     // A new task redraws as its properties change (not as it is typed).
-    const idleShown = !task && !several && [idle.key, idle.label];
-    if (creating) this.draw(details, JSON.stringify([shown, NEW_PROJECT_ID, creating.version]), force, () => { if (shown) this.renderProjectCreator(details.element, creating); });
-    else this.draw(details, JSON.stringify([shown, Boolean(view), Boolean(host), local ? "local" : selected.length, task?.id, entry && [entry.task, entry.destination], task?.raw, task?.description, task && this.children(task).map(child => child.raw), several && selected.map(item => item.raw), idleShown]), force,
-      () => { if (shown) this.renderDetails(details.element, host, entry ? [] : local ? [local] : selected, task, entry?.destination); });
-    // The idle list follows the tasks and its View options as they change; its head (and so its open View options) stays.
-    const idleList = this.idleList;
-    if (idleList?.element.isConnected) this.draw(idleList, JSON.stringify([todayIso(), this.indexVersion, this.listRows, idle, this.idleOptions(idle)]), force, () => this.renderIdleList(idleList.element, idle));
-    else { this.idleList = undefined; this.idlePanel = undefined; this.idleOptionsOpen = false; }
+    if (creating) this.draw(details, JSON.stringify([alone, NEW_PROJECT_ID, creating.version]), force, () => { if (alone) this.renderProjectCreator(details.element, creating); });
+    else this.draw(details, JSON.stringify([alone, Boolean(view), Boolean(host), local ? "local" : selected.length, task?.id, entry && [entry.task, entry.destination], task?.raw, task?.description, task && this.children(task).map(child => child.raw), several && selected.map(item => item.raw)]), force,
+      () => { if (alone) this.renderDetails(details.element, host, entry ? [] : local ? [local] : selected, task, entry?.destination); });
   }
 
-  /** Lays the sidebar out for a mode: in Today and Upcoming, their tasks over the selected task's details; else the details alone. */
-  private build(mode: SidebarMode, skeleton: string): void {
+  /** Lays the sidebar out for a list: its name and View options over its tasks (or today's calendar), then the details. */
+  private build(idle: IdleView, skeleton: string): void {
     const container = this.content;
     const settings = this.plugin.settings;
     this.listDrag?.dispose();
@@ -291,12 +259,11 @@ export class TaskSidebarView extends ItemView {
     container.toggleClass("tm-style-things", settings.style === "things");
     container.toggleClass("tm-style-griply", settings.style === "griply");
     container.toggleClass("tm-density-compact", settings.density === "compact");
-    for (const name of ["today", "upcoming", "details", "note"] as const) container.toggleClass(`is-${name}`, mode === name);
+    container.toggleClass("is-calendar", Boolean(idle.calendar));
     this.buildToolbar(container);
-    this.plannerHead = mode === "upcoming" ? this.buildUndatedHead(container) : undefined;
-    if (!this.plannerHead) { this.undatedPanel = undefined; this.plannerTitle = undefined; }
-    this.planner = mode === "details" ? undefined : { element: container.createDiv({ cls: "tm-sidebar-planner", attr: { "data-tm-scroll-key": "sidebar-planner" } }) };
-    if (mode === "upcoming") this.takeUndatedDrops(this.planner!.element);
+    this.plannerHead = this.buildIdleHead(container, idle);
+    this.planner = { element: container.createDiv({ cls: "tm-sidebar-planner tm-sidebar-idle", attr: { "data-tm-scroll-key": "sidebar-planner" } }) };
+    if (idle.undated) this.takeUndatedDrops(this.planner.element);
     this.details = { element: container.createDiv({ cls: "tm-sidebar-pane", attr: { "data-tm-scroll-key": "sidebar-details" } }) };
     this.skeleton = skeleton;
   }
@@ -341,8 +308,7 @@ export class TaskSidebarView extends ItemView {
   }
 
   /**
-   * Escape, or the close button: the task shown goes, and the sidebar shows what it shows for the view (Today's hours,
-   * the tasks without a date) or that no task is selected. What was typed in it is not saved; a new task is dropped.
+   * Escape, or the close button: the task shown goes, and the sidebar shows its list again. What was typed in it is not saved; a new task is dropped.
    */
   private closeDetails(): void {
     if (this.newProject) { this.newProject = undefined; this.render(); return; }
@@ -354,7 +320,7 @@ export class TaskSidebarView extends ItemView {
     this.render();
   }
 
-  /** Shows a task of the day or the list in the details, until another is selected here or in the view. */
+  /** Shows a task of the list (or the day) in the details, until another is selected here or in the view. */
   private select(task: Task): void {
     this.newProject = undefined;
     this.localId = task.id;
@@ -428,7 +394,7 @@ export class TaskSidebarView extends ItemView {
     await this.taskView()?.dropTasks(tasks, target);
   }
 
-  // Today: the day's calendar. Upcoming, or beside a calendar: tasks without a date, as list rows.
+  // The list, or Smart Context's today: the day's calendar.
 
   private renderToday(element: HTMLElement): void {
     const tasks = sortTasks(this.plugin.index.query({ mode: "all", showCompleted: false }).filter(task => calendarDate(task)));
@@ -455,104 +421,12 @@ export class TaskSidebarView extends ItemView {
   }
 
   /**
-   * The view's tasks without a date (Upcoming's: All Tasks, its View options' dates set to No date), as a list's rows;
-   * they drag onto a day in the view, and tasks dragged here from the view lose their dates.
+   * What the sidebar lists while no task is shown: Smart Context unless a view, a smart list, a project or a tag is
+   * chosen (one since removed goes back to Smart Context).
    */
-  private renderUndated(element: HTMLElement, { label, query, filtered, sort, descending, grouping: chosen, group }: UndatedList): void {
-    const grouping = chosen === "default" ? group : chosen;
-    const all = sortTasks(this.plugin.index.query(query), sort, descending);
-    const ids = new Set(all.map(task => task.id));
-    // Subtasks go with their task.
-    const tasks = all.filter(task => !task.parentId || !ids.has(task.parentId));
-    if (!tasks.length) {
-      const empty = element.createDiv({ cls: "tm-empty tm-sidebar-empty" });
-      // Every task has a date, unless filters chosen in its View options leave tasks out.
-      setIcon(empty.createDiv({ cls: "tm-empty-icon" }), filtered ? "filter" : "calendar-check");
-      empty.createEl("h3", { text: filtered ? `No tasks in ${label} match the filters` : "Every task has a date" });
-      return;
-    }
-    // Its rows drag to the view (or a sidebar list); among themselves, there is nothing to reorder.
-    this.listDrag?.dispose();
-    this.listDrag = new ListDragController(id => this.plugin.index.taskById(id), async () => {}, false, task => this.startDrag([task]), false);
-    const shown = tasks.slice(0, this.listRows);
-    // Grouped (from its View options), each group under its heading; else one list.
-    const groups = grouping === "none" ? [["", shown] as const] : [...groupTasks(shown, grouping, descending && sort === grouping)];
-    for (const [key, group] of groups) {
-      const parent = key ? element.createEl("section", { cls: "tm-section" }) : element;
-      if (key) parent.createEl("h2", { text: /^\d{4}-\d{2}-\d{2}$/.test(key) ? formatDate(key, this.plugin.dateFormat()) : grouping === "source" ? noteGroupName(key, this.plugin.settings.noteGroupLabel) : key });
-      const list = parent.createDiv({ cls: "tm-task-list", attr: { role: "list", "aria-label": key || "Tasks without a date" } });
-      for (const task of group) this.renderRow(list, task);
-    }
-    const hidden = tasks.length - this.listRows;
-    if (hidden > 0) {
-      const more = element.createEl("button", { cls: "tm-show-more-tasks", text: `Show ${Math.min(LIST_PAGE, hidden)} more (${hidden} hidden)`, attr: { type: "button", "data-tm-focus-key": "sidebar-show-more" } });
-      more.addEventListener("click", () => { this.listRows += LIST_PAGE; this.render(); });
-    }
-  }
-
-  /** Above the tasks without a date: their name, and View options to filter, sort and group them as a view's. */
-  private buildUndatedHead(container: HTMLElement): HTMLElement {
-    const head = container.createDiv({ cls: "tm-sidebar-planner-head" });
-    this.plannerTitle = head.createSpan({ cls: "tm-sidebar-planner-title", text: "No date" });
-    const toggle = head.createEl("button", { cls: "tm-filter-toggle clickable-icon", attr: { type: "button", "data-tm-focus-key": "undated-view-options" } });
-    const key = (): string => { const view = this.taskView(); return view ? this.undatedList(view).key : UNDATED_OPTIONS; };
-    this.undatedPanel = new ViewOptionsPanel(head, toggle, {
-      state: () => this.undatedState(),
-      update: change => {
-        const state = this.undatedState();
-        this.plugin.saveViewOptions?.(key(), {
-          filters: change.filters ?? state.filters, sort: change.sort ?? state.sort,
-          descending: change.descending ?? state.descending, grouping: change.grouping ?? state.grouping
-        });
-        this.render();
-      },
-      clear: () => { this.plugin.saveViewOptions?.(key(), undefined); this.render(); },
-      // Read lazily: the panel outlives task changes, so choices must reflect the current tasks.
-      tasks: () => this.plugin.index.allTasks(),
-      expanded: () => this.undatedOptionsOpen,
-      setExpanded: open => { this.undatedOptionsOpen = open; }
-    });
-    return head;
-  }
-
-  /**
-   * Beside Upcoming (or Today's calendar): All Tasks, as its view lists them (by note), its View options' dates set to
-   * No date until they are changed there. Beside another view's calendar: that view's own tasks without a date, through
-   * its filters but those on dates, then the list's own; none until one is chosen, when it sorts as the view does.
-   */
-  private undatedList(view: TaskMainView): UndatedList {
-    const state = view.getState();
-    if (!view.pagePath && (state.mode === "today" || state.mode === "upcoming")) {
-      const own = this.plugin.settings.viewOptions?.[ALL_TASKS_OPTIONS];
-      const filters = own?.filters ?? cloneTaskFilters(UNDATED_FILTERS);
-      return {
-        key: ALL_TASKS_OPTIONS, label: "All Tasks", query: { mode: "all", showCompleted: false, filters }, filters,
-        filtered: JSON.stringify(filters) !== JSON.stringify(UNDATED_FILTERS),
-        sort: own?.sort ?? "date", descending: own ? own.descending : false, grouping: own?.grouping ?? "default", group: "source"
-      };
-    }
-    const { query, sort, descending } = view.undatedQuery();
-    const own = this.plugin.settings.viewOptions?.[UNDATED_OPTIONS];
-    return {
-      key: UNDATED_OPTIONS, label: "No date", query: { ...query, filters: [...query.filters ?? [], ...own?.filters ?? []] }, filters: own?.filters ?? [],
-      filtered: Boolean(own?.filters.length), sort: own?.sort ?? sort, descending: own ? own.descending : descending, grouping: own?.grouping ?? "default", group: "none"
-    };
-  }
-
-  private undatedState(): ViewOptionsState {
-    const view = this.taskView();
-    const list = view ? this.undatedList(view) : undefined;
-    // Completed tasks are left out unless a status filter asks for them.
-    return {
-      sort: list?.sort ?? "date", descending: list?.descending ?? false, grouping: list?.grouping ?? "default", filters: list?.filters ?? [], openOnly: true,
-      defaultGroup: groupingLabel(list?.group ?? "none")
-    };
-  }
-
-  /** What the sidebar lists when it has nothing else to show: Upcoming unless another view, a smart list, a project or a tag is chosen. */
   private idleView(): IdleView {
     const chosen = this.plugin.settings.sidebarIdleView;
-    // A project's open tasks, by heading as its page groups them; a project since removed falls back to Upcoming.
+    // A project's open tasks, by heading as its page groups them.
     const project = chosen?.startsWith("project:") ? this.plugin.index.projects().find(item => `project:${item.path}` === chosen) : undefined;
     if (project) return { key: chosen, label: project.name, query: { mode: "project", projectPath: project.path, showCompleted: false }, sort: "date", descending: false, group: "section" };
     // A tag's, as its page lists them: through its note when it links to one, so a tag's other spellings count too.
@@ -572,13 +446,37 @@ export class TaskSidebarView extends ItemView {
       const group = list.grouping !== "default" ? list.grouping : scope?.mode === "today" ? "today" : scope?.mode === "upcoming" ? "date" : "none";
       return { key: `smartList:${list.id}`, label: list.name, query, sort: list.sort, descending: list.descending, group };
     }
-    const [mode, label] = IDLE_VIEWS.find(([value]) => value === chosen) ?? IDLE_VIEWS[2];
+    const view = IDLE_VIEWS.find(([value]) => value === chosen);
+    if (!view) return this.contextView();
+    const [mode, label] = view;
     return { key: mode, label, query: { mode, showCompleted: false }, sort: "date", descending: false, group: mode === "today" ? "today" : mode === "upcoming" ? "date" : mode === "all" ? "source" : "none" };
   }
 
-  /** The idle list's own View options, kept with the views' options for each list it can show. */
+  /**
+   * Smart Context: All Tasks (by note, as its view groups them), its View options set for what is in front. Beside
+   * Today, Today's calendar; beside Upcoming, both dates No date (tasks dropped there lose theirs); beside a note (task
+   * mode off), its Note that note; beside a note's task view (task mode on), by action date.
+   */
+  private contextView(): IdleView {
+    const base = { label: "Smart Context", query: { mode: "all", showCompleted: false } as TaskQuery, sort: "date" as const, descending: false, group: "source" as const };
+    const view = this.taskView();
+    const mode = view?.getState().mode;
+    if (view && !view.pagePath && mode === "today") return { ...base, key: "context:today", calendar: true };
+    if (view && !view.pagePath && mode === "upcoming") return { ...base, key: "context:upcoming", filters: UNDATED_FILTERS, undated: true, empty: ["calendar-check", "Every task has a date"] };
+    if (view?.pagePath) return { ...base, key: "context:page", group: "date" };
+    const note = view ? undefined : this.note.noteView()?.file?.path;
+    if (note) return { ...base, key: "context:note", pinned: [{ property: "source", operator: "is", values: [note] }], empty: ["file-text", "No tasks in this note"] };
+    return { ...base, key: "context:all" };
+  }
+
+  /** The list's own View options, kept with the views' options for each list it can show (and each Smart Context). */
   private idleOptions(idle: IdleView): SavedViewOptions | undefined {
     return this.plugin.settings.viewOptions?.[`sidebar:${idle.key}`];
+  }
+
+  /** The list's filters, as its View options show them: pinned ones, then its own (or its defaults, until changed). */
+  private idleFilters(idle: IdleView): TaskFilter[] {
+    return cloneTaskFilters([...idle.pinned ?? [], ...this.idleOptions(idle)?.filters ?? idle.filters ?? []]);
   }
 
   private idleState(): ViewOptionsState {
@@ -586,33 +484,34 @@ export class TaskSidebarView extends ItemView {
     const own = this.idleOptions(idle);
     // Completed tasks are left out unless a status filter asks for them.
     return {
-      sort: own?.sort ?? idle.sort, descending: own ? own.descending : idle.descending, grouping: own?.grouping ?? "default", filters: own?.filters ?? [], openOnly: true,
+      sort: own?.sort ?? idle.sort, descending: own ? own.descending : idle.descending, grouping: own?.grouping ?? "default", filters: this.idleFilters(idle), openOnly: true,
       defaultGroup: idle.group === "today" ? "Overdue and today" : groupingLabel(idle.group)
     };
   }
 
   /**
-   * Where the sidebar would otherwise show nothing (no task selected, or a note without tasks of its own): a view's tasks,
-   * Upcoming's unless its name (a button) picks another view or a smart list, with View options of their own. A click
-   * shows one's details. `empty` says what the sidebar is for while the list has no tasks.
+   * Above the list: its name, a button that picks what the sidebar lists (Smart Context, a view, a smart list, a project
+   * or a tag), beside its View options (none for today's calendar).
    */
-  private renderIdle(container: HTMLElement, empty: { title: string; text: string }): void {
-    const idle = this.idleView();
-    const wrapper = container.createDiv({ cls: "tm-sidebar-idle" });
-    const head = wrapper.createDiv({ cls: "tm-sidebar-planner-head" });
+  private buildIdleHead(container: HTMLElement, idle: IdleView): HTMLElement {
+    const head = container.createDiv({ cls: "tm-sidebar-planner-head" });
     const label = `${idle.label}: choose what shows here when no task is selected`;
     const title = head.createEl("button", { cls: "tm-sidebar-planner-title tm-sidebar-idle-title", attr: { type: "button", "aria-haspopup": "listbox", "aria-label": label, title: label, "data-tm-focus-key": "sidebar-idle-view" } });
     title.createSpan({ text: idle.label });
     setIcon(title.createSpan({ cls: "tm-sidebar-idle-chevron", attr: { "aria-hidden": "true" } }), "chevron-down");
     title.addEventListener("click", () => this.chooseIdleView(title));
+    this.idlePanel = undefined;
+    if (idle.calendar) return head;
     const toggle = head.createEl("button", { cls: "tm-filter-toggle clickable-icon", attr: { type: "button", "data-tm-focus-key": "idle-view-options" } });
     this.idlePanel = new ViewOptionsPanel(head, toggle, {
       state: () => this.idleState(),
       update: change => {
+        const idle = this.idleView();
         const state = this.idleState();
-        this.plugin.saveViewOptions?.(`sidebar:${this.idleView().key}`, {
-          filters: change.filters ?? state.filters, sort: change.sort ?? state.sort,
-          descending: change.descending ?? state.descending, grouping: change.grouping ?? state.grouping
+        // Pinned filters are not the list's own to keep: they follow what is in front.
+        const filters = (change.filters ?? state.filters).filter(filter => !idle.pinned?.some(pin => sameFilter(pin, filter)));
+        this.plugin.saveViewOptions?.(`sidebar:${idle.key}`, {
+          filters, sort: change.sort ?? state.sort, descending: change.descending ?? state.descending, grouping: change.grouping ?? state.grouping
         });
         this.render();
       },
@@ -622,23 +521,24 @@ export class TaskSidebarView extends ItemView {
       expanded: () => this.idleOptionsOpen,
       setExpanded: open => { this.idleOptionsOpen = open; }
     });
-    this.idleList = { element: wrapper.createDiv({ cls: "tm-sidebar-idle-list" }) };
-    this.idleEmpty = empty;
+    return head;
   }
 
   /**
-   * The idle list's name opens a list of what it can show, with a search on top: Inbox, Today, Upcoming, All Tasks, a
-   * smart list, a project or a tag, each with the icon the task sidebar gives it.
+   * The list's name opens a list of what it can show, with a search on top: Smart Context, Inbox, Today, Upcoming, All
+   * Tasks, a smart list, a project or a tag, each with the icon the task sidebar gives it.
    */
   private chooseIdleView(anchor: HTMLElement): void {
     const style = this.plugin.settings.style;
     const projects = activeProjects(this.plugin.index.projects()).sort((a, b) => a.name.localeCompare(b.name));
     const byPath = new Map(projects.map(project => [project.path, project]));
     const glyph = (color: string): string => `tm-choice-color-${color}`;
+    const chosen = this.idleView().key;
     openChoicePopover({
-      anchor, label: "Show when no task is selected", selected: this.idleView().key,
+      anchor, label: "Show when no task is selected", selected: chosen.startsWith("context:") ? SMART_CONTEXT : chosen,
       input: { placeholder: "Find a list, project or tag", filter: true },
       choices: [
+        { value: SMART_CONTEXT, label: "Smart Context", icon: "sparkles", cls: glyph("blue") },
         ...IDLE_VIEWS.map(([value, label]) => {
           const { icon, color } = listGlyph(value, style)!;
           // Things fills Today's star, as the task sidebar does.
@@ -663,21 +563,24 @@ export class TaskSidebarView extends ItemView {
     });
   }
 
-  /** The idle list's tasks, through its View options, grouped as its view groups them unless they say otherwise. */
+  /** The list's tasks, through its View options, grouped as its view groups them unless they say otherwise. */
   private renderIdleList(element: HTMLElement, idle: IdleView): void {
     const own = this.idleOptions(idle);
     const sort = own?.sort ?? idle.sort;
     const descending = own ? own.descending : idle.descending;
     const grouping = own && own.grouping !== "default" ? own.grouping : idle.group;
-    const all = sortTasks(this.plugin.index.query({ ...idle.query, filters: [...idle.query.filters ?? [], ...own?.filters ?? []] }), sort, descending);
+    const all = sortTasks(this.plugin.index.query({ ...idle.query, filters: [...idle.query.filters ?? [], ...this.idleFilters(idle)] }), sort, descending);
     const ids = new Set(all.map(task => task.id));
     // Subtasks go with their task.
     const tasks = all.filter(task => !task.parentId || !ids.has(task.parentId));
     if (!tasks.length) {
+      // Filters chosen in its View options may be what leaves it empty.
+      const filtered = own !== undefined && JSON.stringify(own.filters) !== JSON.stringify(idle.filters ?? []);
+      const [icon, title] = idle.empty ?? ["list-checks", `No tasks in ${idle.label}`];
       const empty = element.createDiv({ cls: "tm-empty tm-sidebar-empty" });
-      setIcon(empty.createDiv({ cls: "tm-empty-icon" }), "mouse-pointer-click");
-      empty.createEl("h3", { text: this.idleEmpty.title });
-      empty.createEl("p", { text: own?.filters.length ? `No tasks in ${idle.label} match the filters.` : this.idleEmpty.text });
+      setIcon(empty.createDiv({ cls: "tm-empty-icon" }), icon);
+      empty.createEl("h3", { text: title });
+      empty.createEl("p", { text: filtered ? "No tasks match the filters." : "Select a task here or in a task view, or put the cursor on a checklist in a note, to see its details here." });
       return;
     }
     // Its rows drag to a task view or a sidebar list, as a view's do.
@@ -702,25 +605,6 @@ export class TaskSidebarView extends ItemView {
       const list = parent.createDiv({ cls: "tm-task-list", attr: { role: "list", "aria-label": title || idle.label } });
       for (const task of group) this.renderRow(list, task);
     }
-    const hidden = tasks.length - this.listRows;
-    if (hidden > 0) {
-      const more = element.createEl("button", { cls: "tm-show-more-tasks", text: `Show ${Math.min(LIST_PAGE, hidden)} more (${hidden} hidden)`, attr: { type: "button", "data-tm-focus-key": "sidebar-show-more" } });
-      more.addEventListener("click", () => { this.listRows += LIST_PAGE; this.render(); });
-    }
-  }
-
-  /** Beside a note: its tasks, in order and nested as in the note; a click shows one's details, as the caret on it does. */
-  private renderNoteTasks(element: HTMLElement, path: string): void {
-    const tasks = this.note.noteTasks();
-    if (!tasks.length) {
-      this.renderIdle(element, { title: "No tasks in this note", text: "Put the cursor on a checklist to see its details here." });
-      return;
-    }
-    // Its rows drag to a task view or a sidebar list, as a view's do.
-    this.listDrag?.dispose();
-    this.listDrag = new ListDragController(id => this.plugin.index.taskById(id), async () => {}, false, task => this.startDrag([task]), false);
-    const list = element.createDiv({ cls: "tm-task-list", attr: { role: "list", "aria-label": `Tasks in ${noteName(path)}` } });
-    for (const { task, depth } of tasks.slice(0, this.listRows)) this.renderRow(list, task, depth);
     const hidden = tasks.length - this.listRows;
     if (hidden > 0) {
       const more = element.createEl("button", { cls: "tm-show-more-tasks", text: `Show ${Math.min(LIST_PAGE, hidden)} more (${hidden} hidden)`, attr: { type: "button", "data-tm-focus-key": "sidebar-show-more" } });
@@ -967,10 +851,7 @@ export class TaskSidebarView extends ItemView {
   /** `destination`: for a new task, the note it will go to. */
   private renderDetails(container: HTMLElement, host: DetailsHost | undefined, selected: Task[], task: Task | undefined, destination?: string): void {
     if (host && !task && selected.length > 1) { this.renderSelectionDetails(container, host, selected); return; }
-    if (!host || !task) {
-      this.renderIdle(container, { title: "No task selected", text: host ? "Select a task to see its details here." : "Select a task in a task view, or put the cursor on a checklist in a note, to see its details here." });
-      return;
-    }
+    if (!host || !task) return;
     this.renderTaskDetails(container, host, task, destination);
     // A new task is in no note yet.
     if (task.id === NEW_TASK_ID) return;

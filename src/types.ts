@@ -228,8 +228,9 @@ export interface TaskManagerSettings {
   /** Set once the task sidebar and Task Details have opened on first run; closed later, they stay closed. */
   panelsPlaced: boolean;
   /**
-   * What the Task Details sidebar lists when it has nothing else to show (no task selected, or a note without tasks):
-   * "upcoming", "today", "inbox", "all", a smart list as "smartList:<id>", a project as "project:<path>" or a tag as "tag:<name>".
+   * What the Task Details sidebar lists while no task is shown: "context" (Smart Context, which follows the view or note
+   * in front), "upcoming", "today", "inbox", "all", a smart list as "smartList:<id>", a project as "project:<path>" or a
+   * tag as "tag:<name>".
    */
   sidebarIdleView: string;
 }
@@ -275,7 +276,7 @@ export const DEFAULT_SETTINGS: TaskManagerSettings = {
   ignoredTags: [],
   ignoreCodeBlockTasks: true,
   panelsPlaced: false,
-  sidebarIdleView: "upcoming"
+  sidebarIdleView: "context"
 };
 
 export type TaskEditorPreset = Partial<Omit<TaskDraft, "indent">>;
