@@ -99,7 +99,7 @@ The Task details sidebar sits in Obsidian's right sidebar. It shows the task you
 **Smart Context**, the default, is All Tasks with View options that follow what you're looking at:
 
 - **Today:** today's calendar, with tasks that have no time above the hours. Drag a task onto an hour to schedule it, or click an hour to add a task there.
-- **Upcoming, or any calendar:** tasks with no date, by note (on a project's calendar, the project's). Its filter button starts with both dates set to **No date**; change them to list other tasks. Drag one onto a day to give it a date, or drag a task here to take its dates off.
+- **Upcoming, or any calendar:** tasks with no date, by note (on a project's or a tag's calendar, the project's or the tag's). Its filter button starts with both dates set to **No date**; change them to list other tasks. Drag one onto a day to give it a date, or drag a task here to take its dates off.
 - **A note:** the note's tasks (the Note filter follows the note in front). Put the cursor on a checklist line to see and edit its details.
 - **A note's task view (task mode on):** all tasks, by action date.
 - **Anything else:** all tasks, by note.

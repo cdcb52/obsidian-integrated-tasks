@@ -455,7 +455,7 @@ export class TaskSidebarView extends ItemView {
   /**
    * Smart Context: All Tasks (by note, as its view groups them), its View options set for what is in front. Beside
    * Today, Today's calendar; beside Upcoming or any view's calendar, both dates No date (tasks dropped there lose
-   * theirs), a project's calendar its Note that project's too; beside a note (task mode off), its Note that note; beside a note's task view (task mode on), by action date.
+   * theirs), a project's calendar its Note that project's too and a tag's its Tags that tag; beside a note (task mode off), its Note that note; beside a note's task view (task mode on), by action date.
    */
   private contextView(): IdleView {
     const base = { label: "Smart Context", query: { mode: "all", showCompleted: false } as TaskQuery, sort: "date" as const, descending: false, group: "source" as const };
@@ -464,9 +464,12 @@ export class TaskSidebarView extends ItemView {
     // Beside a calendar, the tasks to drag onto its days.
     if (view?.hasCalendar || (view && !view.pagePath && mode === "upcoming")) {
       const project = view.pagePath && mode !== "tags" ? view.pagePath : undefined;
+      const state = view.getState();
+      const tag = mode !== "tags" ? undefined : typeof state.tag === "string" && state.tag ? state.tag : view.pagePath ? this.plugin.index.tagForPath(view.pagePath) : undefined;
+      const pinned: TaskFilter[] = project ? [{ property: "source", operator: "is", values: [project] }] : tag ? [{ property: "tags", operator: "is", values: [tag] }] : [];
       return {
         ...base, key: "context:upcoming", filters: UNDATED_FILTERS, undated: true, empty: ["calendar-check", "Every task has a date"],
-        ...project ? { pinned: [{ property: "source", operator: "is", values: [project] }] } : {}
+        ...pinned.length ? { pinned } : {}
       };
     }
     if (view && !view.pagePath && mode === "today") return { ...base, key: "context:today", calendar: true };

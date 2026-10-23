@@ -391,7 +391,7 @@ describe("what the Task Details sidebar shows", () => {
 
   it("lists the tasks without a date beside any view's calendar, as beside Upcoming; Today's calendar is today's hours alone", async () => {
     const today = todayIso();
-    const { view, sidebar, main, side } = await setup([["A.md", [`- [ ] At nine ${today} 09:00`, "- [ ] No date"].join("\n")], ["B.md", "- [ ] Also undated"]]);
+    const { view, sidebar, main, side } = await setup([["A.md", [`- [ ] At nine ${today} 09:00`, "- [ ] No date"].join("\n")], ["B.md", "- [ ] Also undated #[[errand]]"]]);
     expect(sidebar.getIcon()).toBe("circle-check-big");
     const listed = () => Array.from(side().querySelectorAll(".tm-sidebar-planner .tm-task-item .tm-task-title")).map(title => title.textContent);
     await view.setState({ mode: "all", layout: "calendar" });
@@ -401,6 +401,9 @@ describe("what the Task Details sidebar shows", () => {
     await view.setState({ mode: "all", pagePath: "A.md", layout: "calendar" });
     expect(listed()).toEqual(["No date"]);
     expect(side().querySelector(".tm-sidebar-planner-head .tm-options-badge")!.textContent).toBe("3");
+    // A tag's: its tasks without a date.
+    await view.setState({ mode: "tags", tag: "errand", layout: "calendar" });
+    expect(listed()).toEqual(["Also undated"]);
     // Today's calendar, whatever scope was kept: no date, buttons or scopes above the hours; beside it, the same list.
     await view.setState({ mode: "today", layout: "calendar", calendarScope: "month" });
     expect(main().querySelector(".tm-calendar.is-day-scope")).not.toBeNull();
