@@ -281,11 +281,7 @@ export class ViewOptionsPanel {
     const { filters, descending } = this.host.state();
     const open = this.host.expanded();
     this.panel.hidden = !open;
-    if (open && this.host.underToggle) {
-      const box = this.toggle.getBoundingClientRect();
-      this.panel.style.setProperty("--tm-options-top", `${box.bottom + 6}px`);
-      this.panel.style.setProperty("--tm-options-right", `${Math.max(8, this.toggle.ownerDocument.documentElement.clientWidth - box.right)}px`);
-    }
+    if (open && this.host.underToggle) this.placeUnderToggle();
     this.toggle.setAttribute("aria-expanded", String(open));
     this.toggle.toggleClass("is-active", open);
     const label = `View options: filter, sort, and group${filters.length ? ` (${filters.length} active ${filters.length === 1 ? "filter" : "filters"})` : ""}`;
@@ -317,6 +313,23 @@ export class ViewOptionsPanel {
       this.summary(property.key, summary, !filter);
     }
     this.dropdown?.render();
+  }
+
+  /**
+   * Places the panel under its button, its right edge at the button's. A fixed panel is placed from the box Obsidian's
+   * tab gives it (a tab contains its layout), not from the window: where it sits at 0, 0 is measured first.
+   */
+  private placeUnderToggle(): void {
+    const style = this.panel.style;
+    style.setProperty("--tm-options-top", "0px");
+    style.setProperty("--tm-options-right", "0px");
+    // Its opening animation moves it; measured without, then it plays.
+    style.setProperty("animation", "none");
+    const origin = this.panel.getBoundingClientRect();
+    style.removeProperty("animation");
+    const button = this.toggle.getBoundingClientRect();
+    style.setProperty("--tm-options-top", `${button.bottom + 6 - origin.top}px`);
+    style.setProperty("--tm-options-right", `${Math.max(8, origin.right - button.right)}px`);
   }
 
   private summary(key: string, text: string, placeholder: boolean): void {
