@@ -96,8 +96,9 @@ Each view remembers its own options and layout. To keep a setup, choose **Conver
 
 The Task details sidebar sits in Obsidian's right sidebar. What it shows follows what you're looking at:
 
-- **Today:** today's hours. Drag a task onto an hour to schedule it, or click an hour to add a task there.
-- **A calendar, or Upcoming:** that view's tasks with no date. Drag one onto a day to give it a date.
+- **Today:** today's calendar, with tasks that have no time above the hours. Drag a task onto an hour to schedule it, or click an hour to add a task there.
+- **Upcoming:** All Tasks with no date, by note. Its filter button starts with both dates set to **No date**; change them to list other tasks. Drag one onto a day to give it a date.
+- **A calendar:** that view's tasks with no date.
 - **A note:** the note's tasks. Put the cursor on a checklist line to see and edit its details.
 - **A selected task:** its title, properties, notes and subtasks, all editable in place. With several tasks selected, change a property once and every selected task follows.
 - **Nothing else:** your upcoming tasks, by date. Click one to see its details. Click the **Upcoming** heading to show Inbox, Today, All Tasks, a smart list, a project or a tag here instead (type to search them), and use the filter button beside it to filter, sort and group that list.
@@ -120,7 +121,7 @@ You can also drop tasks on the task sidebar: on **Inbox**, a project or a note t
 
 ![A month calendar of all tasks, coloured by project, with tasks that have no date listed in the sidebar](resources/images/calendar-month.png)
 
-See your tasks across a day, four days, a week or a month (the year view is in the command palette). On phones a calendar opens on a single day. A task sits on its scheduled date, or on its deadline if it has no scheduled date, tinted with its project's colour.
+See your tasks across a day, four days, a week or a month (the year view is in the command palette). On phones a calendar opens on a single day. Today's calendar is always today's hours, without the date and buttons above them. A task sits on its scheduled date, or on its deadline if it has no scheduled date, tinted with its project's colour.
 
 Drag a task to another day or time to reschedule it. In the day, 4-day and week layouts, drag across empty time to create a task, or drag the edge of a timed task to change how long it takes. Tasks with a date but no time sit in the row above the hours.
 

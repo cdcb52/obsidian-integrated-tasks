@@ -121,22 +121,25 @@ describe("what the Task Details sidebar shows", () => {
     expect((plugin as unknown as { openProjectCreator: ReturnType<typeof vi.fn> }).openProjectCreator).toHaveBeenCalledOnce();
   });
 
-  it("follows the task view in front: today's hours for Today, the tasks with no date for Upcoming, else the selected task", async () => {
+  it("follows the task view in front: today's calendar for Today, All Tasks with no date for Upcoming, else the selected task", async () => {
     const today = todayIso();
     const { view, sidebar, side, setActive, contents } = await setup([["A.md", [`- [ ] At nine ${today} 09:00`, `- [ ] Due today ${today}`, "- [ ] No date", "  - [ ] Its subtask", `- [ ] Only a deadline {${today}}`, "- [ ] Another undated"].join("\n")]]);
     await view.setState({ mode: "today" });
     expect(side().classList.contains("is-today")).toBe(true);
     expect(side().querySelector(".tm-sidebar-planner .tm-calendar.is-day-scope")).not.toBeNull();
     expect(Array.from(side().querySelectorAll(".tm-calendar-lane .tm-calendar-task-title")).map(title => title.textContent)).toEqual(["At nine"]);
-    // Only the hours: no heading, no calendar controls, no all-day row, no tray for tasks without a date.
-    expect(side().querySelector("h4, .tm-calendar-toolbar, .tm-calendar-allday, .tm-calendar-unscheduled")).toBeNull();
+    // The day as Today's calendar shows it, its all-day tasks above the hours; no heading, controls or tray for tasks without a date.
+    expect(Array.from(side().querySelectorAll(".tm-calendar-allday .tm-calendar-task-title")).map(title => title.textContent)).toEqual(["Due today", "Only a deadline"]);
+    expect(side().querySelector("h4, .tm-calendar-toolbar, .tm-calendar-unscheduled")).toBeNull();
     // With no task selected, the hours have the sidebar to themselves.
     expect(side().querySelector<HTMLElement>(".tm-sidebar-pane")!.hidden).toBe(true);
     expect(side().querySelector(".tm-sidebar-pane")!.childElementCount).toBe(0);
 
     await view.setState({ mode: "upcoming" });
     expect(side().classList.contains("is-upcoming")).toBe(true);
-    // As a list's rows, subtasks with their task.
+    // All Tasks with No date, as a list's rows by note, subtasks with their task.
+    expect(side().querySelector(".tm-sidebar-planner-head .tm-sidebar-planner-title")!.textContent).toBe("All Tasks");
+    expect(Array.from(side().querySelectorAll(".tm-sidebar-planner .tm-section h2")).map(heading => heading.textContent)).toEqual(["A"]);
     expect(Array.from(side().querySelectorAll(".tm-sidebar-planner .tm-task-item .tm-task-title")).map(title => title.textContent)).toEqual(["No date", "Another undated"]);
     expect(side().querySelector("h4, .tm-calendar, .tm-calendar-task")).toBeNull();
     expect(side().querySelector<HTMLElement>(".tm-sidebar-pane")!.hidden).toBe(true);
@@ -301,8 +304,8 @@ describe("what the Task Details sidebar shows", () => {
     expect(option("today").classList.contains("is-filled")).toBe(false);
   });
 
-  it("gives the tasks without a date View options of their own, to filter, sort and group them", async () => {
-    const { view, sidebar, plugin, side } = await setup([["A.md", ["- [ ] Bravo p2", "- [ ] Alpha p1", "- [ ] Charlie p2", "- [ ] Delta"].join("\n")]]);
+  it("gives Upcoming's All Tasks View options of their own, its dates set to No date until changed", async () => {
+    const { view, sidebar, plugin, side } = await setup([["A.md", ["- [ ] Bravo p2", "- [ ] Alpha p1", "- [ ] Charlie p2", "- [ ] Delta", `- [ ] Echo p2 ${todayIso()}`].join("\n")]]);
     const saved: Record<string, unknown> = {};
     Object.assign(plugin, { saveViewOptions: (key: string, options: unknown) => {
       if (options) plugin.settings.viewOptions = { ...plugin.settings.viewOptions, [key]: options as never };
@@ -312,20 +315,22 @@ describe("what the Task Details sidebar shows", () => {
     await view.setState({ mode: "upcoming" });
     const titles = () => Array.from(side().querySelectorAll(".tm-sidebar-planner .tm-task-item .tm-task-title")).map(title => title.textContent);
     const toggle = side().querySelector<HTMLButtonElement>(".tm-sidebar-planner-head .tm-filter-toggle")!;
-    expect(side().querySelector(".tm-sidebar-planner-head .tm-sidebar-planner-title")!.textContent).toBe("No date");
+    expect(side().querySelector(".tm-sidebar-planner-head .tm-sidebar-planner-title")!.textContent).toBe("All Tasks");
     const viewOrder = titles();
     expect(viewOrder).toHaveLength(4);
+    // Its dates' No date shows in its View options, as filters to change.
+    expect(toggle.querySelector(".tm-options-badge")!.textContent).toBe("2");
     toggle.click();
     expect(side().querySelector<HTMLElement>(".tm-sidebar-planner-head .tm-options-panel")!.hidden).toBe(false);
-    // Its own options, kept with the views': P2 only, by title, grouped by priority.
-    plugin.settings.viewOptions = { ...plugin.settings.viewOptions, "sidebar:undated": { filters: [{ property: "priority", operator: "is", values: ["2"] }], sort: "title", descending: false, grouping: "priority" } };
+    // Its own options, kept with the views': P2 only (any date, so the dated one too), by title, grouped by priority.
+    plugin.settings.viewOptions = { ...plugin.settings.viewOptions, "sidebar:all-tasks": { filters: [{ property: "priority", operator: "is", values: ["2"] }], sort: "title", descending: false, grouping: "priority" } };
     sidebar.render(true);
-    expect(titles()).toEqual(["Bravo", "Charlie"]);
+    expect(titles()).toEqual(["Bravo", "Charlie", "Echo"]);
     expect(Array.from(side().querySelectorAll(".tm-sidebar-planner .tm-section h2")).map(heading => heading.textContent)).toEqual(["P2"]);
     expect(toggle.querySelector(".tm-options-badge")!.textContent).toBe("1");
-    // Clear all goes back to the view's order, all of them.
+    // Clear all goes back to No date, in the view's order.
     side().querySelector<HTMLButtonElement>(".tm-options-clear")!.click();
-    expect(saved["sidebar:undated"]).toBeUndefined();
+    expect(saved["sidebar:all-tasks"]).toBeUndefined();
     expect(titles()).toEqual(viewOrder);
   });
 
@@ -339,9 +344,15 @@ describe("what the Task Details sidebar shows", () => {
     layout("calendar");
     expect(side().classList.contains("is-upcoming")).toBe(true);
     expect(Array.from(side().querySelectorAll(".tm-sidebar-planner .tm-task-item .tm-task-title")).map(title => title.textContent)).toEqual(["No date"]);
-    // Today's calendar too, rather than its hours again.
-    await view.setState({ mode: "today", layout: "calendar" });
+    expect(side().querySelector(".tm-sidebar-planner-title")!.textContent).toBe("No date");
+    // Today's calendar too, rather than its hours again: All Tasks with no date, as beside Upcoming.
+    await view.setState({ mode: "today", layout: "calendar", calendarScope: "month" });
     expect(side().classList.contains("is-upcoming")).toBe(true);
+    expect(side().querySelector(".tm-sidebar-planner-title")!.textContent).toBe("All Tasks");
+    // Today's calendar is today's hours alone, whatever scope was kept: no date, buttons or scopes above them.
+    expect(main().querySelector(".tm-calendar.is-day-scope")).not.toBeNull();
+    expect(main().querySelector(".tm-calendar-toolbar")).toBeNull();
+    expect(Array.from(main().querySelectorAll(".tm-calendar-lane .tm-calendar-task-title")).map(title => title.textContent)).toEqual(["At nine"]);
     layout("list");
     expect(side().classList.contains("is-today")).toBe(true);
   });

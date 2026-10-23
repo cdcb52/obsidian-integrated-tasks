@@ -812,8 +812,10 @@ export class TaskMainView extends ItemView {
 
   private renderTaskLayouts(container: HTMLElement, tasks: Task[]): void {
     if (this.layout === "calendar") {
+      // Today's calendar is today's hours alone: no date, buttons or scopes above them, and the period never changes.
+      const today = this.state.mode === "today" && !this.pagePath;
       renderCalendar(container, {
-        anchor: this.calendarAnchor, scope: this.calendarScope, tasks, dateFormat: this.plugin.dateFormat(),
+        anchor: today ? todayIso() : this.calendarAnchor, scope: today ? "day" : this.calendarScope, toolbar: !today, tasks, dateFormat: this.plugin.dateFormat(),
         color: task => this.plugin.settings.calendarProjectColors ? this.plugin.index.projectColor(task.path) : undefined,
         priorityColors: this.plugin.settings.calendarPriorityColors,
         navigate: (anchor, scope) => {

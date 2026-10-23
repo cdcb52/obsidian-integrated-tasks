@@ -1373,6 +1373,9 @@ button.tm-gantt-handle::after { content: ""; position: absolute; top: 0; bottom:
 /* Keep a visible keyboard focus indicator on the otherwise invisible resize handles. */
 .tm-calendar-resize-handle:focus-visible { outline: 2px solid var(--background-modifier-border-focus, var(--interactive-accent)); outline-offset: -2px; border-radius: 2px; }
 .tm-calendar .tm-calendar-grid { border-left: 1px solid var(--background-modifier-border); border-bottom: 1px solid var(--background-modifier-border); }
+/* A month's line on the left starts below its weekdays: the first day of each week draws it, not the grid. */
+.tm-calendar .tm-calendar-grid:not(.is-compact) { border-left: 0; }
+.tm-calendar .tm-calendar-grid:not(.is-compact) > .tm-calendar-cell:nth-child(7n+1) { border-left: 1px solid var(--background-modifier-border); }
 .tm-calendar .tm-calendar-cell.is-outside > .tm-calendar-date { color: var(--text-faint, var(--text-muted)); opacity: .5; }
 .tm-calendar input.tm-calendar-check { margin: 0; padding: 0; appearance: none; width: 12px; height: 12px; min-width: 12px; --checkbox-color: var(--tm-priority-color, var(--tm-project-color, var(--interactive-accent))); --checkbox-border-color: var(--tm-priority-color, var(--tm-project-color, var(--interactive-accent))); cursor: pointer; }
 .tm-calendar input.tm-calendar-check:checked { background: var(--tm-priority-color, var(--tm-project-color, var(--interactive-accent))); }
@@ -2581,6 +2584,8 @@ button.tm-sidebar-idle-title:hover, button.tm-sidebar-idle-title:focus-visible {
 
 /* Today's hours fill their part, and scroll. */
 .tm-sidebar-calendar, .tm-sidebar-calendar .tm-calendar { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
+/* Today's all-day tasks above its hours, scrolling on their own when there are many. */
+.tm-sidebar-calendar .tm-calendar-allday { flex-shrink: 0; max-height: 30%; overflow-y: auto; }
 .tm-task-sidebar .tm-calendar-day-scroll { flex: 1; min-height: 0; max-height: none; border-radius: var(--radius-m); }
 /* Upcoming's tasks with no date are a list's rows, narrower: their properties go below the title. */
 .tm-task-sidebar :is(.tm-sidebar-planner, .tm-sidebar-idle) .tm-task-list { margin: 0; }

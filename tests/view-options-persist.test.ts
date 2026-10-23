@@ -290,17 +290,17 @@ describe("Calendar scope and Gantt range kept for each view", () => {
     const today = todayIso();
     const { view, settings, content } = await setup([["A.md", `- [ ] Call ${today}`], ["Site.md", "- [ ] Page"]], { "Site.md": { tags: ["project"], start: today, end: today } });
     const scope = (label: string) => content().querySelector<HTMLButtonElement>(`.tm-calendar-scopes button[aria-label="${label}"]`)!;
-    await view.setState({ mode: "today", layout: "calendar" });
+    await view.setState({ mode: "all", layout: "calendar" });
     scope("Week").click();
-    expect(settings.viewPeriods.today).toEqual({ calendarScope: "week" });
+    expect(settings.viewPeriods.all).toEqual({ calendarScope: "week" });
     // Another view keeps its own (a month until changed); back again, the week holds.
     await view.setState({ mode: "upcoming", layout: "calendar" });
     expect(view.getState().calendarScope).toBe("month");
-    await view.setState({ mode: "today", layout: "calendar" });
+    await view.setState({ mode: "all", layout: "calendar" });
     expect(view.getState().calendarScope).toBe("week");
     // Back to a month, nothing is kept.
     scope("Month").click();
-    expect(settings.viewPeriods.today).toBeUndefined();
+    expect(settings.viewPeriods.all).toBeUndefined();
 
     await view.setState({ mode: "projects" });
     content().querySelector<HTMLButtonElement>('[data-tm-focus-key="layout-gantt"]')!.click();
