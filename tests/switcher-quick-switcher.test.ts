@@ -61,7 +61,7 @@ function host(taskCount = 2) {
   const tasks = scanTasks("Notes/Work.md", Array.from({ length: taskCount }, (_, i) => `- [ ] Task ${i}`).join("\n"));
   const query = vi.fn(() => tasks);
   return {
-    index: { projects: () => [project("Old", "cancelled"), project("Launch"), { ...project("Shipped"), completedTasks: 2 }], tagSummaries: () => [{ name: "#work", openTasks: 1, completedTasks: 0 }], query },
+    index: { projects: () => [project("Old", "cancelled"), project("Launch"), { ...project("Shipped", "done"), completedTasks: 2 }], tagSummaries: () => [{ name: "#work", openTasks: 1, completedTasks: 0 }], query },
     settings: { smartLists: [{ id: "focus", name: "Focus", filters: [], sort: "date", descending: false, grouping: "none" }] },
     openTaskView: vi.fn().mockResolvedValue(undefined),
     openProject: vi.fn().mockResolvedValue(undefined),

@@ -156,7 +156,7 @@ You don't have to edit them by hand: the **…** beside a project's title, or a 
 
 ![A project page with its sections, start and end dates, deadline and progress, and the selected task in the sidebar](resources/images/project-page.png)
 
-Projects show their progress, counting subtasks. A project's `status` says where it stands; without one, it is **To do** until every task is done, then **Done**. Done and cancelled projects leave the sidebar, and their tasks stay in other views. In task mode a project's description shows in a card at the top of its page; click it to edit.
+Projects show their progress, counting subtasks. A project's `status` says where it stands; a project without one is **To do**, however many of its tasks are done. Done and cancelled projects leave the sidebar, and their tasks stay in other views. In task mode a project's description shows in a card at the top of its page; click it to edit.
 
 The Projects view lists your projects grouped by status. Drag a project to another status, in the list or on a board, or move it right under another project to make it a subproject. Use **View options** to filter, sort and group projects as you would tasks.
 

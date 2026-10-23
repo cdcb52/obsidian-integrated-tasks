@@ -136,7 +136,7 @@ describe("The Projects view", () => {
     "Site.md": { tags: ["project"], status: "In progress", priority: 1 },
     "Home.md": { tags: ["project"], status: "on hold" },
     "Garden.md": { tags: ["project"] },
-    "Old.md": { tags: ["project", "archived"], status: "Cancelled" }
+    "Old.md": { tags: ["project"], status: "Cancelled" }
   };
   const sections = (content: HTMLElement) => Array.from(content.querySelectorAll(".tm-section, .tm-kanban-column")).map(section => [
     (section.querySelector("h2 > span") ?? section.querySelector("h2"))!.textContent, Array.from(section.querySelectorAll(".tm-task-title")).map(title => title.textContent)
@@ -145,8 +145,8 @@ describe("The Projects view", () => {
   it("lists and boards projects by their status, every status a group, and has no calendar", async () => {
     const { view, plugin, settings, content } = await setup(projects(), frontmatter);
     await view.setState({ mode: "projects" });
-    // A status property says a project's status; without one, its tasks say whether it is done.
-    const byStatus = [["To do", []], ["In progress", ["Site"]], ["Waiting", ["Home"]], ["Done", ["Garden"]], ["Cancelled", ["Old"]]];
+    // A status property says a project's status; without one, a project is to do, even with its tasks all done.
+    const byStatus = [["To do", ["Garden"]], ["In progress", ["Site"]], ["Waiting", ["Home"]], ["Done", []], ["Cancelled", ["Old"]]];
     expect(sections(content())).toEqual(byStatus);
     // Each group is a status, so the rows leave theirs out.
     expect(content().querySelectorAll(".tm-project-status")).toHaveLength(0);

@@ -47,28 +47,9 @@ export function projectTotals(projects: Project[]): Map<string, ProjectTotals> {
   return totals;
 }
 
-/**
- * Each project's status: its `status` property, or without one, as in Things, Done once its tasks are all done (100%)
- * and To do until then. One with no tasks yet is still To do, and so is one with a subproject still open. A
- * subproject's tasks count towards its parent's, so a parent with none of its own is done with its subprojects.
- */
+/** Each project's status, taken only from its `status` property: a project without one, or with one not recognised, is To do. */
 export function projectStatuses(projects: Project[]): Map<string, TaskStatus> {
-  const children = subprojects(projects);
-  const totals = projectTotals(projects);
-  const statuses = new Map<string, TaskStatus>();
-  const status = (project: Project, seen: Set<string>): TaskStatus => {
-    const known = statuses.get(project.path);
-    if (known) return known;
-    if (seen.has(project.path)) return "todo";
-    seen.add(project.path);
-    const { open, completed } = totals.get(project.path)!;
-    const result: TaskStatus = project.status ?? (open === 0 && completed > 0
-      && !(children.get(project.path) ?? []).some(child => !isClosedStatus(status(child, seen))) ? "done" : "todo");
-    statuses.set(project.path, result);
-    return result;
-  };
-  for (const project of projects) status(project, new Set());
-  return statuses;
+  return new Map(projects.map(project => [project.path, project.status ?? "todo"]));
 }
 
 /** The projects still in progress: neither done nor cancelled. */

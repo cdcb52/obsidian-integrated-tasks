@@ -6,34 +6,41 @@ import type { Project } from "../src/types";
 const project = (name: string, openTasks: number, completedTasks: number, extra: Partial<Project> = {}): Project =>
   ({ path: `${name}.md`, name, openTasks, completedTasks, ...extra });
 
-it("counts a project without a status whose tasks are all done as done, else to do", () => {
+it("counts a project without a status as to do, whatever its tasks", () => {
   const projects = [
     project("Doing", 2, 1), project("Done", 0, 3), project("Empty", 0, 0), project("Shelved", 0, 2, { status: "cancelled" }),
-    // A parent whose own tasks are done stays active while a subproject is; once that is done too, so is the parent.
     project("Parent", 0, 1), project("Child", 1, 0, { parentPath: "Parent.md" }),
     project("Finished parent", 0, 1), project("Finished child", 0, 2, { parentPath: "Finished parent.md" })
   ];
   expect(Object.fromEntries(projectStatuses(projects))).toEqual({
-    "Doing.md": "todo", "Done.md": "done", "Empty.md": "todo", "Shelved.md": "cancelled",
-    "Parent.md": "todo", "Child.md": "todo", "Finished parent.md": "done", "Finished child.md": "done"
+    "Doing.md": "todo", "Done.md": "todo", "Empty.md": "todo", "Shelved.md": "cancelled",
+    "Parent.md": "todo", "Child.md": "todo", "Finished parent.md": "todo", "Finished child.md": "todo"
   });
-  expect(activeProjects(projects).map(item => item.name)).toEqual(["Doing", "Empty", "Parent", "Child"]);
+  expect(activeProjects(projects).map(item => item.name)).toEqual(["Doing", "Done", "Empty", "Parent", "Child", "Finished parent", "Finished child"]);
   // Moving a task offers only active projects.
-  expect(projectChoices(projects, "Inbox.md").map(choice => choice.label)).toEqual(["Inbox", "Child", "Doing", "Empty", "Parent"]);
+  expect(projectChoices(projects, "Inbox.md").map(choice => choice.label))
+    .toEqual(["Inbox", "Child", "Doing", "Done", "Empty", "Finished child", "Finished parent", "Parent"]);
+});
+
+it("keeps a project whose tasks are all done but has no status property to do", () => {
+  const projects = [project("Complete", 0, 4)];
+  expect(projectStatuses(projects).get("Complete.md")).toBe("todo");
+  expect(activeProjects(projects).map(item => item.name)).toEqual(["Complete"]);
 });
 
 it("counts a subproject's tasks towards its parent, leaving a cancelled one out", () => {
   const projects = [
     // Two done tasks of its own, twenty open in a subproject: a tenth done, and active.
     project("House", 0, 2), project("Kitchen", 20, 0, { parentPath: "House.md" }),
-    // With no tasks of its own, it completes with its subprojects.
+    // With no tasks of its own, it counts its subprojects' tasks.
     project("Trip", 0, 0), project("Flights", 0, 2, { parentPath: "Trip.md" }), project("Hotel", 0, 1, { parentPath: "Trip.md" }),
     project("Garden", 0, 1), project("Pond", 3, 0, { parentPath: "Garden.md", status: "cancelled" })
   ];
   expect(projectTotals(projects).get("House.md")).toEqual({ open: 20, completed: 2 });
   expect(projectTotals(projects).get("Trip.md")).toEqual({ open: 0, completed: 3 });
   expect(projectTotals(projects).get("Garden.md")).toEqual({ open: 0, completed: 1 });
-  expect(Object.fromEntries(projectStatuses(projects))).toMatchObject({ "House.md": "todo", "Trip.md": "done", "Garden.md": "done" });
+  // Progress alone never sets a status.
+  expect(Object.fromEntries(projectStatuses(projects))).toMatchObject({ "House.md": "todo", "Trip.md": "todo", "Garden.md": "todo" });
 });
 
 it("lets a status property say a project's status, whatever its tasks", () => {
