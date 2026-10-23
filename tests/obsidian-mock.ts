@@ -12,6 +12,7 @@ export const getAllTags = (cache: { tags?: Array<{ tag: string }>; frontmatter?:
 ];
 
 export const Platform = { isMacOS: true };
+export const Keymap = { isModEvent: (event: MouseEvent): boolean => event.metaKey || event.ctrlKey };
 
 // Minimal SVG shape for note-pill decoration styles in the Node test host.
 export const getIcon = (name: string) => ({

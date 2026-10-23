@@ -28,7 +28,7 @@ export interface CalendarOptions {
   /** The project a card stands for, when projects show among the tasks: its progress takes the checkbox's place, it
    * opens as a project, and it drags (to move its dates) without selecting or reaching the sidebar. */
   project?: (task: Task) => Project | undefined;
-  openProject?: (project: Project) => void;
+  openProject?: (project: Project, event?: MouseEvent) => void;
   resize: (task: Task, date: string, time: string, duration: number) => Promise<void>;
   /** `time`: where it was dropped in a day's hours; none keeps the task's own, and null (its all-day row) takes it off. */
   move: (task: Task, date: string, time?: string | null) => Promise<void>;
@@ -222,7 +222,7 @@ export function renderCalendar(container: HTMLElement, options: CalendarOptions)
     card.addClass("is-project");
     const icon = card.createSpan({ cls: "tm-calendar-project-progress", attr: { "aria-hidden": "true" } });
     renderProjectProgress(icon, project, false);
-    const open = (event: Event): void => { event.stopPropagation(); options.openProject?.(project); };
+    const open = (event: Event): void => { event.stopPropagation(); options.openProject?.(project, event instanceof MouseEvent ? event : undefined); };
     card.createEl("button", { cls: "tm-calendar-task-title", text: project.name, attr: { type: "button", "aria-label": `Open project ${project.name}`, "data-tm-focus-key": `calendar-title:${task.id}` } })
       .addEventListener("click", open);
     card.addEventListener("click", open);

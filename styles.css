@@ -1772,7 +1772,7 @@ body .modal-container .modal.tm-bottom-sheet.is-top::before { top: auto; bottom:
 /* View options panel: a popover of sort, group and filter rows under the header's filter button. */
 .tm-view-header { position: relative; }
 button.tm-filter-toggle { position: relative; display: inline-flex; align-items: center; justify-content: center; }
-/* View options sits at the right, beside Add task, also when a narrow header spreads its buttons across the width. */
+/* View options sits at the right, also when a narrow header spreads its buttons across the width. */
 .tm-header-actions > button.tm-filter-toggle { margin-inline-start: auto; }
 button.tm-filter-toggle.is-active { background: var(--background-modifier-hover); color: var(--text-normal); }
 .tm-options-toggle-icon { display: inline-flex; }

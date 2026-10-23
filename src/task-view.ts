@@ -36,7 +36,7 @@ import { draftForGroup, isStructuralGroup, taskGroupTarget, type ListDropGroup, 
 import { renderCalendar } from "./calendar-view";
 import { addDays, daysBetween, rescheduledDraft, type CalendarScope } from "./calendar";
 import { STATUS_ICONS, STATUS_LABELS, TASK_STATUSES, isClosedStatus, statusFromLabel } from "./task-status";
-import { ItemView, Menu, Notice, Platform, setIcon, TFile, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
+import { ItemView, Keymap, Menu, Notice, Platform, setIcon, TFile, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
 import { actionDate, formatDate, parseDateExpression, todayIso } from "./date";
 import { groupTasks, orderTaskTree, sortTasks, taskMatchesQuery } from "./query";
 import { markDropZone, startTaskDrag, type SidebarDrop } from "./sidebar-drop";
@@ -824,7 +824,7 @@ export class TaskMainView extends ItemView {
         bind: (card, task) => this.bindSelection(card, task),
         dragStart: task => this.prepareDrag(task),
         project: task => this.shownProjects.get(task.id),
-        openProject: project => void this.plugin.openProject(project.path).catch(error => new Notice(String(error))),
+        openProject: (project, event) => this.openProject(project, event),
         resize: async (task, date, time, duration) => {
           const latest = this.plugin.index.taskById(task.id);
           if (!latest) throw new Error("Task no longer exists. Refresh the view and try again.");
@@ -1068,15 +1068,15 @@ export class TaskMainView extends ItemView {
       });
     }
     const toggle = actions.createEl("button", { cls: "tm-filter-toggle clickable-icon", attr: { "aria-label": "View options: filter, sort, and group", "data-tm-focus-key": "view-options" } });
-    const addLabel = projects ? "Create new project" : "Add task";
-    const add = actions.createEl("button", { cls: "clickable-icon", attr: { "aria-label": addLabel, title: addLabel, "data-tm-focus-key": "add-task" } });
-    const icon = add.createSpan();
-    setIcon(icon, "plus");
-    add.addEventListener("click", () => this.newTask());
     // A project's description, in a card under the whole header.
     this.headerDescription = container.createDiv({ cls: "tm-project-description" });
     this.renderHeaderMetadata();
     return toggle;
+  }
+
+  /** Opens a project's note in this tab, as the file explorer opens a file; Cmd/Ctrl (`event`) opens a new tab. */
+  private openProject(project: Project, event?: MouseEvent): void {
+    void this.plugin.openProject(project.path, { newLeaf: event ? Keymap.isModEvent(event) : false }).catch(error => new Notice(String(error)));
   }
 
   /**
@@ -1495,7 +1495,7 @@ export class TaskMainView extends ItemView {
       scale: this.ganttScale,
       // The timeline redraws itself; the view keeps where it is for its next drawing.
       zoomed: (anchor, zoom, scale) => { this.ganttAnchor = anchor; this.ganttZoom = zoom; this.ganttScale = scale; this.savePeriod(); },
-      open: project => { void this.plugin.openProject(project.path).catch(error => new Notice(String(error))); },
+      open: (project, event) => this.openProject(project, event),
       edit: (project, field) => this.openProjectProperty(project, field),
       menu: (project, at, anchor) => this.openProjectMenu(project, anchor, at),
       update: async (project, changes) => {
@@ -1596,7 +1596,7 @@ export class TaskMainView extends ItemView {
     const primary = content.createDiv({ cls: "tm-task-primary" });
     const lead = things ? primary.createSpan({ cls: "tm-things-lead" }) : undefined;
     const button = primary.createEl("button", { cls: "tm-task-title", text: project.name, attr: { title: project.path } });
-    button.addEventListener("click", () => void this.plugin.openProject(project.path).catch(error => new Notice(String(error))));
+    button.addEventListener("click", event => this.openProject(project, event));
     // Right-click opens the project's actions, as it does a task's.
     row.addEventListener("contextmenu", event => {
       event.preventDefault();

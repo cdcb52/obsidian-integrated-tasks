@@ -21,7 +21,8 @@ interface GanttOptions {
   /** A scale zoomed to (pixels per day) instead of the range's own; the timeline then redraws itself. */
   scale?: number;
   zoomed?: (anchor: string, zoom: GanttZoom, scale: number) => void;
-  open: (project: Project) => void;
+  /** Opens a project's note; `event`, the click, says where (Cmd/Ctrl: a new tab). */
+  open: (project: Project, event?: MouseEvent) => void;
   edit?: (project: Project, field: keyof ProjectDraft) => void;
   /** A right-click on a project's row: its actions, at the pointer, beside its title. */
   menu?: (project: Project, at: { x: number; y: number }, anchor: HTMLElement) => void;
@@ -239,7 +240,7 @@ export function renderGantt(container: HTMLElement, options: GanttOptions): void
     renderProjectProgress(icon, project, false);
     const content = label.createDiv({ cls: "tm-gantt-project-content" });
     const title = content.createEl("button", { cls: "tm-task-title", text: project.name, attr: { title: project.path, "aria-label": `Open ${project.name} project note` } });
-    title.addEventListener("click", () => options.open(project));
+    title.addEventListener("click", event => options.open(project, event));
     rowProjects.set(row, { project, title });
     const metadata = content.createDiv({ cls: "tm-project-header-metadata" });
     const paintDetails = (): void => {
@@ -325,11 +326,11 @@ export function renderGantt(container: HTMLElement, options: GanttOptions): void
     if (!range) {
       const missing = !project.scheduledDate ? "Set start date" : !project.endDate ? "Set end date" : "Finish is before start";
       const edit = track.createEl("button", { cls: "tm-gantt-jump", text: missing });
-      edit.addEventListener("click", () => options.open(project));
+      edit.addEventListener("click", event => options.open(project, event));
       continue;
     }
     const bar = track.createEl("button", { cls: "tm-gantt-bar" });
-    bar.addEventListener("click", () => { if (!busy) options.open(project); });
+    bar.addEventListener("click", event => { if (!busy) options.open(project, event); });
     const jump = track.createEl("button", { cls: "tm-gantt-jump", text: `Show ${formatDate(range.start, options.dateFormat)}` });
     jump.addEventListener("click", () => options.navigate(addDays(project.scheduledDate!, -1), zoom, scale));
     const handles = new Map<GanttHandle, HTMLButtonElement>();

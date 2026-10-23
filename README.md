@@ -104,7 +104,7 @@ The Task details sidebar sits in Obsidian's right sidebar. What it shows follows
 
 In the title, Enter saves what you typed and Shift+Enter moves on to the notes (a task card in the list works the same way). Press Escape to go back to the hours or the list. **Open in note**, at the bottom, opens the task's note at its line, turning task mode off when that note would otherwise open as its task view. If you close the sidebar, run **Open task details sidebar** to bring it back.
 
-With **Task details** set to three panes, new tasks open here: Enter writes one and opens the next, ready to type, until you press Escape. New projects open here too (run **Create new project**, or use the add button in Projects): name it, set its properties, then press Enter or **Create project**.
+With **Task details** set to three panes, new tasks open here: Enter writes one and opens the next, ready to type, until you press Escape. New projects open here too (run **Create new project**): name it, set its properties, then press Enter or **Create project**.
 
 ## Choose a layout
 

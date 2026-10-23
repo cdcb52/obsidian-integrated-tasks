@@ -873,9 +873,9 @@ export default class TaskManagerPlugin extends Plugin {
   }
 
   /**
-   * A new task in the open view's context: a task view's tag, project or date (as its Add task button, so in the
-   * Things style a blank card in the list), or the open note when it is a project or a tag's note; otherwise the
-   * Inbox, as from the Projects view, whose Add button makes projects. With a sidebar focused (such as the task
+   * A new task in the open view's context: a task view's tag, project or date (as a group's Add task button, so in
+   * the Things style a blank card in the list), or the open note when it is a project or a tag's note; otherwise the
+   * Inbox, as from the Projects view. With a sidebar focused (such as the task
    * navigation), the context is the last view in the main area.
    */
   newTask(): void {

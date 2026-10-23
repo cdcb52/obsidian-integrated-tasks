@@ -972,8 +972,11 @@ describe("View options › Projects in the calendar", () => {
     const [launch] = projects();
     expect(launch.querySelector(".tm-project-progress")).not.toBeNull();
     expect(launch.querySelector("input[type=checkbox]")).toBeNull();
+    // In this tab, as the file explorer opens a file; Cmd/Ctrl opens a new one.
     launch.querySelector<HTMLElement>(".tm-calendar-task-title")!.click();
-    expect(openProject).toHaveBeenCalledExactlyOnceWith("Launch.md");
+    expect(openProject).toHaveBeenCalledExactlyOnceWith("Launch.md", { newLeaf: false });
+    launch.querySelector<HTMLElement>(".tm-calendar-task-title")!.dispatchEvent(new MouseEvent("click", { bubbles: true, metaKey: true }));
+    expect(openProject).toHaveBeenLastCalledWith("Launch.md", { newLeaf: true });
     // The calendar has the switch too.
     const toggle = content().querySelector<HTMLElement>("[data-tm-focus-key='option-projects']")!;
     expect(toggle.getAttribute("aria-checked")).toBe("true");
