@@ -27,10 +27,10 @@ describe("project note properties", () => {
 });
 
 describe("convert to project", () => {
-  it("adds a project tag and every project property, empty", () => {
+  it("adds a project tag and every project property, empty but for a To do status", () => {
     const properties = {};
     addProjectProperties(properties);
-    expect(properties).toEqual({ tags: ["project"], date: null, "end date": null, deadline: null, priority: null, status: null, parent: null, color: null, description: null });
+    expect(properties).toEqual({ tags: ["project"], date: null, "end date": null, deadline: null, priority: null, status: "To do", parent: null, color: null, description: null });
     expect(Object.keys(properties)).toEqual(["tags", "date", "end date", "deadline", "priority", "status", "parent", "color", "description"]);
   });
 
@@ -39,7 +39,19 @@ describe("convert to project", () => {
     const original = structuredClone(properties);
     addProjectProperties(properties);
     addProjectProperties(properties);
-    expect(properties).toEqual({ ...original, "end date": null, status: null, parent: null, color: null, description: null });
+    expect(properties).toEqual({ ...original, "end date": null, status: "To do", parent: null, color: null, description: null });
+  });
+
+  it("sets an empty status to To do and keeps a status that is set", () => {
+    for (const empty of [null, "", "  ", []]) {
+      const properties: Record<string, unknown> = { Status: empty };
+      addProjectProperties(properties);
+      expect(properties.Status).toBe("To do");
+      expect(properties).not.toHaveProperty("status");
+    }
+    const properties: Record<string, unknown> = { status: "In progress" };
+    addProjectProperties(properties);
+    expect(properties.status).toBe("In progress");
   });
 
   it("preserves an existing parent link on repeated conversion", () => {

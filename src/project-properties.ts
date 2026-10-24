@@ -1,6 +1,6 @@
 import type { ProjectDateField } from "./gantt";
 import { formatDate, parseStrictDateExpression } from "./date";
-import { statusFromLabel } from "./task-status";
+import { STATUS_LABELS, statusFromLabel } from "./task-status";
 import type { Priority, ProjectProperties } from "./types";
 
 export const PROJECT_COLORS = ["red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink", "gray"] as const;
@@ -79,6 +79,12 @@ export function addProjectProperties(frontmatter: Record<string, unknown>): void
     ["description", ["description"]]
   ] as const) {
     if (!aliases.some((alias) => keys.has(alias))) frontmatter[name] = null;
+  }
+  // A missing or empty status starts as To do, under the note's own spelling of the key.
+  const statusKey = Object.keys(frontmatter).find((key) => key.toLowerCase().replace(/[\s_-]/g, "") === "status") ?? "status";
+  const status = frontmatter[statusKey];
+  if (status == null || (typeof status === "string" && !status.trim()) || (Array.isArray(status) && !status.some((item) => item != null && String(item).trim()))) {
+    frontmatter[statusKey] = STATUS_LABELS.todo;
   }
 }
 
